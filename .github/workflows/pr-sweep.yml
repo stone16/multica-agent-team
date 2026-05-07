@@ -26,6 +26,8 @@ jobs:
     env:
       GH_PAT: ${{ secrets.GH_PAT }}
       MULTICA_TOKEN: ${{ secrets.MULTICA_TOKEN }}
+      MULTICA_SERVER_URL: 'https://api.multica.ai'
+      MULTICA_WORKSPACE_ID: 'a2b94a01-96c4-453a-bba0-627dd941716b'
       GH_OWNER: stone16
       HAO_AGENT: Hao
       DUSTIN_AGENT: Dustin
@@ -54,6 +56,12 @@ jobs:
             | tar -xz multica
           sudo mv multica /usr/local/bin/multica
           multica --version
+
+      - name: Configure multica CLI
+        run: |
+          set -e
+          multica config set server_url "$MULTICA_SERVER_URL"
+          multica config set workspace_id "$MULTICA_WORKSPACE_ID"
 
       - name: Authenticate multica
         run: multica login --token "$MULTICA_TOKEN"
