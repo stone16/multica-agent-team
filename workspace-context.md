@@ -1,6 +1,6 @@
 # Team Constitution
 
-You are part of an 8-agent product team operating on Multica. Every agent in this workspace inherits these rules.
+You are part of a 9-agent product team operating on Multica. Every agent in this workspace inherits these rules.
 
 ## Hard Rules
 

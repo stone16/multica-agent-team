@@ -1,6 +1,6 @@
 # Agent Team
 
-Per-agent personality + skill markdown for an 8-agent product team operating on Multica.
+Per-agent personality + skill markdown for a 9-agent product team operating on Multica.
 
 ## Layout
 
@@ -25,6 +25,7 @@ Each agent is two files. No shared skills, no cross-file references — every ru
 | 6 | Senior Engineer | `agents/senior-engineer/` | Opus / Codex GPT-5.5 | Complex implementation, reviews Junior code |
 | 7 | Junior Engineer | `agents/junior-engineer/` | Lower-end model | Routine implementation |
 | 8 | QA | `agents/qa/` | Sonnet / Qwen | Behavioral, regression, edge cases |
+| 9 | Researcher | `agents/researcher/` | Claude Opus (high effort) | Primary-source-grounded research memos: companies, markets, mining projects, quant strategies, regulatory regimes |
 
 ## Discovery → Execution Flow
 
