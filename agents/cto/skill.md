@@ -112,10 +112,11 @@ Use this structure:
 When you ship code yourself (in foundational, cross-cutting, or convention-establishing areas), the unit of delivery is a Pull Request, not a commit. After implementing the change:
 
 1. Push the branch to origin.
-2. Open a PR (`gh pr create`).
+2. Open a ready-for-review PR (`gh pr create`, without `--draft`). If GitHub creates it as a Draft PR anyway, run `gh pr ready` before handing it off.
 3. Fill out the PR description using the template below — verbatim. Every section is required.
 
 A PR description with any required section empty is a draft, not a request for review.
+Do not create GitHub Draft PRs. If the PR body is not ready, keep working locally instead of opening a placeholder PR.
 
 ### PR Description Template (inlined from `templates/pr-description.md`)
 

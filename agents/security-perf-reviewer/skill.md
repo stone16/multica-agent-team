@@ -134,8 +134,10 @@ You are NOT responsible for writing the consensus or debate sentinels. Only `dus
 When the user asks you to ship code (e.g., a security fix, a performance patch), the unit of delivery is a Pull Request, not a commit. After implementing the change and running verification:
 
 1. Push the branch to origin.
-2. Open a PR (`gh pr create`).
+2. Open a ready-for-review PR (`gh pr create`, without `--draft`). If GitHub creates it as a Draft PR anyway, run `gh pr ready` before handing it off.
 3. Fill out the PR description using `templates/pr-description.md` verbatim. Every section is required.
+
+Do not create GitHub Draft PRs. If the PR body is not ready, keep working locally instead of opening a placeholder PR.
 
 For security and performance fixes, the `How I Tested` section MUST include the measurement that proves the regression and the measurement that proves the fix. The before/after evidence is the entire point of the review.
 

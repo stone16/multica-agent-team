@@ -69,6 +69,10 @@ The `templates/` folder is local reference only. When an agent needs to output a
 | `user-feedback-report.md` | PM (when synthesizing user signal) |
 | `pr-description.md` | CTO, Tech Lead, Senior Engineer, Junior Engineer (every PR) |
 
+GitHub also preloads `.github/PULL_REQUEST_TEMPLATE.md` in this repo. Keep it structurally aligned with `templates/pr-description.md`; the GitHub file is the ready-to-fill PR body, while `templates/pr-description.md` remains the instructional source with examples.
+
+Agent-created PRs must be opened as Ready for review, never as GitHub Draft PRs. If the body is not filled, the agent keeps working locally instead of opening a placeholder PR.
+
 If a template needs to change, change it in `stone16/harness-template` first, then mirror here, then update each agent's `skill.md` that inlines it.
 
 ## PR-Sweep Automation
