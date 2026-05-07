@@ -70,10 +70,15 @@ post_pr_comment() {
 # exists in the body, else empty.
 sentinel_verdict() {
   local body="$1" name="$2" sha="$3"
+  # Pipeline returns 1 when grep finds no sentinel — that's the common
+  # case (most PRs have no review yet). The `|| true` keeps the function
+  # returning 0 with empty stdout so callers using `var=$(...)` under
+  # set -e -o pipefail don't blow up.
   printf '%s' "$body" \
     | grep -oE "${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+" \
     | tail -1 \
-    | sed -E "s/.*verdict:[[:space:]]*([a-z-]+).*/\1/"
+    | sed -E "s/.*verdict:[[:space:]]*([a-z-]+).*/\1/" \
+    || true
 }
 
 has_final_sentinel() {
