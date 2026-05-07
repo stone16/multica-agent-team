@@ -1,5 +1,7 @@
 # Pull Request Description Template
 
+> This file is the **canonical source** for the PR description standard. `.github/PULL_REQUEST_TEMPLATE.md` is the minimum-threshold version shown to human contributors; this file is the full standard that code-shipping agents follow.
+
 The unit of delivery is a Pull Request, not a commit. Code-shipping agents (CTO, Tech Lead, Senior Engineer, Junior Engineer) MUST use this template verbatim for every PR.
 
 A PR description with any required section empty is a draft, not a request for review.
