@@ -181,6 +181,10 @@ declare -a DUSTIN_QUEUE=()
 REPOS=$(list_repos)
 log "[scan] enumerated $(echo "$REPOS" | wc -l | tr -d ' ') repos under $GH_OWNER/"
 
+REPOS_OK=0
+REPOS_ERRORED=0
+PRS_TOTAL=0
+
 while IFS= read -r repo; do
   [[ -z "$repo" ]] && continue
   if is_repo_ignored "$repo"; then
@@ -188,9 +192,23 @@ while IFS= read -r repo; do
     continue
   fi
 
+  # Capture stdout + stderr separately so PAT-scope errors don't kill the sweep.
+  if ! prs_raw=$(list_open_prs "$repo" 2>&1); then
+    log "[error] $repo: $prs_raw"
+    REPOS_ERRORED=$((REPOS_ERRORED + 1))
+    continue
+  fi
+  REPOS_OK=$((REPOS_OK + 1))
+
+  if [[ -z "$prs_raw" ]]; then
+    # Repo has zero open PRs. Don't spam the log per repo (we have many).
+    continue
+  fi
+
+  log "[scan] $repo"
   while IFS=$'\t' read -r num sha author; do
     [[ -z "$num" ]] && continue
-    body=$(pr_comments_body "$repo" "$num")
+    PRS_TOTAL=$((PRS_TOTAL + 1))
     pr_id="$GH_OWNER/$repo#$num@$sha"
 
     # Skip self-authored PRs to avoid self-review loops.
@@ -198,6 +216,8 @@ while IFS= read -r repo; do
       log "  [skip] $pr_id author=$author (self-review)"
       continue
     fi
+
+    body=$(pr_comments_body "$repo" "$num")
 
     if has_final_sentinel "$body" "$sha"; then
       log "  [done] $pr_id (consensus or debate already at this SHA)"
@@ -228,8 +248,10 @@ while IFS= read -r repo; do
       DUSTIN_QUEUE+=("$pr_id")
       log "  [need-both] $pr_id"
     fi
-  done < <(list_open_prs "$repo")
+  done <<<"$prs_raw"
 done <<<"$REPOS"
+
+log "[summary] repos_ok=$REPOS_OK repos_errored=$REPOS_ERRORED prs_seen=$PRS_TOTAL"
 
 # Bash 3 + set -u guards: don't deref empty arrays unsafely.
 dispatch_agent "$HAO_AGENT" "${HAO_QUEUE[@]+"${HAO_QUEUE[@]}"}"
