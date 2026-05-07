@@ -20,6 +20,7 @@ set -euo pipefail
 GH_OWNER="${GH_OWNER:-stone16}"
 HAO_AGENT="${HAO_AGENT:-Hao}"
 DUSTIN_AGENT="${DUSTIN_AGENT:-Dustin}"
+CTO_AGENT="${CTO_AGENT:-Stometa}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -65,8 +66,22 @@ post_pr_comment() {
   # this repo, rate limit, vanished PR) abort the entire sweep. Log and move on.
   if ! printf '%s' "$body" | gh pr comment "$2" --repo "$GH_OWNER/$1" --body-file - 2>&1; then
     log "    [warn] post_pr_comment failed for $GH_OWNER/$1#$2 (continuing)"
-    return 0
+    return 1
   fi
+  return 0
+}
+
+pr_url() {
+  printf 'https://github.com/%s/%s/pull/%s' "$GH_OWNER" "$1" "$2"
+}
+
+pr_markdown_link() {
+  printf '[%s/%s#%s](%s)' "$GH_OWNER" "$1" "$2" "$(pr_url "$1" "$2")"
+}
+
+review_queue_item() {
+  local repo="$1" num="$2" sha="$3"
+  printf '%s @ %s' "$(pr_markdown_link "$repo" "$num")" "$sha"
 }
 
 # ---------- Sentinel parsing ----------
@@ -103,7 +118,7 @@ is_docs_only() {
   while IFS= read -r f; do
     [[ -z "$f" ]] && continue
     case "$f" in
-      *.md|*.markdown|*.txt|*.rst|*.adoc|docs/*|*/docs/*|.github/*.md) ;;
+      *.md|*.markdown|*.txt|*.rst|*.adoc|docs/*|*/docs/*) ;;
       *) return 1 ;;
     esac
   done <<<"$files"
@@ -114,20 +129,94 @@ is_docs_only() {
 
 write_consensus() {
   local repo="$1" num="$2" sha="$3" hao="$4" dustin="$5"
-  if [[ "$hao" == "$dustin" ]]; then
-    post_pr_comment "$repo" "$num" "Consensus reached: $hao.
 
-<!-- consensus: $sha verdict: $hao -->"
-    log "    consensus=$hao"
+  if [[ "$hao" == "$dustin" ]]; then
+    if [[ "$hao" != "approve" ]] && ! dispatch_cto_delegation "$repo" "$num" "$sha" "consensus:$hao" "$hao" "$dustin"; then
+      log "    [warn] consensus delegation not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
+      return 0
+    fi
+
+    if post_pr_comment "$repo" "$num" "Consensus reached: $hao.
+
+<!-- consensus: $sha verdict: $hao -->"; then
+      log "    consensus=$hao"
+    else
+      log "    [warn] consensus comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
+    fi
   else
-    post_pr_comment "$repo" "$num" "Reviewers disagree — escalating to human.
+    if ! dispatch_cto_delegation "$repo" "$num" "$sha" "debate" "$hao" "$dustin"; then
+      log "    [warn] debate delegation not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
+      return 0
+    fi
+
+    if post_pr_comment "$repo" "$num" "Reviewers disagree — escalating to human.
 
 - Hao (Senior Engineer): $hao
 - Dustin (Security & Performance Reviewer): $dustin
 
-<!-- debate: $sha -->"
-    log "    debate hao=$hao dustin=$dustin"
+<!-- debate: $sha -->"; then
+      log "    debate hao=$hao dustin=$dustin"
+    else
+      log "    [warn] debate comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
+    fi
   fi
+}
+
+cto_delegation_title() {
+  local repo="$1" num="$2" sha="$3"
+  printf 'PR review delegation needed — %s/%s#%s@%s' "$GH_OWNER" "$repo" "$num" "$sha"
+}
+
+cto_delegation_exists() {
+  local title="$1"
+  local issues
+
+  if ! issues=$(multica issue list --limit 100 --output json 2>/dev/null); then
+    log "    [warn] cto_delegation_exists failed; will try creating delegation"
+    return 1
+  fi
+
+  printf '%s' "$issues" | grep -Fq "$title"
+}
+
+dispatch_cto_delegation() {
+  local repo="$1" num="$2" sha="$3" outcome="$4" hao="$5" dustin="$6"
+  local link
+  link="$(pr_markdown_link "$repo" "$num")"
+  local title
+  title="$(cto_delegation_title "$repo" "$num" "$sha")"
+
+  if cto_delegation_exists "$title"; then
+    log "    cto-delegation=exists $GH_OWNER/$repo#$num@$sha"
+    return 0
+  fi
+
+  local description
+  description=$(cat <<EOF
+CTO delegation needed for $link.
+
+- PR: $link
+- Head commit: $sha
+- Review outcome: $outcome
+- Reviewer verdicts: Hao=$hao, Dustin=$dustin
+
+Review the PR comments, decide whether the findings are correct, then delegate fixes to the right engineer. If the review is wrong, leave the correction on the PR and close this issue.
+
+This issue is assigned to the CTO instead of relying on reviewer-written agent mentions. Manual agent mentions are easy to miss and can create loops; assignment gives one deterministic notification point after review action items exist.
+EOF
+)
+
+  log "    cto-delegation=$CTO_AGENT $GH_OWNER/$repo#$num"
+  if ! printf '%s' "$description" | multica issue create \
+    --title "$title" \
+    --assignee "$CTO_AGENT" \
+    --priority high \
+    --description-stdin \
+    --output json >/dev/null; then
+    log "    [warn] dispatch_cto_delegation failed for $GH_OWNER/$repo#$num (continuing)"
+    return 1
+  fi
+  return 0
 }
 
 # ---------- Dispatch ----------
@@ -149,9 +238,20 @@ Automated code review batch dispatched by \`pr-sweep.sh\` (every 15 min from \`s
 
 For each pull request below, perform a code review per your agent skill (Code Review Verdict format) and post a review comment on the PR ending with your sentinel marker. The PR-sweep script reads the sentinel on the next run; without it your review will not register.
 
-PRs to review (format: \`owner/repo#num@sha\` — the SHA shows the head when this batch was assembled):
+PRs to review (format: clickable \`owner/repo#num\` plus \`@\` head SHA — the SHA shows the head when this batch was assembled):
 
 $pr_list
+
+Both reviewers are required on every non-docs production-code PR; this is not a rotation. Hao owns general code-quality review. Dustin owns security, performance, and adversarial-input review. The lenses differ, but the review depth does not.
+
+Minimum review bar is identical for both reviewers:
+
+- Read the PR diff, linked issue, and changed files in surrounding context before posting.
+- Cite \`file:line\` for every finding.
+- Prioritize production-impacting defects over style, naming, or speculative architecture.
+- Re-run the relevant verification when practical; otherwise state the exact verification gap.
+- Use exactly one of \`approve\`, \`request-changes\`, or \`block\`.
+- Do not write the sentinel unless you completed a real review of the current head SHA.
 
 Operational reminders:
 
@@ -168,19 +268,25 @@ Operational reminders:
 
 3. Verdicts are exactly one of: \`approve\`, \`request-changes\`, \`block\`. The \`pr-sweep.sh\` parser is strict; other words are ignored.
 
-4. When all PRs are reviewed, post a one-line summary comment on this Multica issue and set status to \`in_review\`. If a PR errors out (auth, rate limit, vanished), note it in the summary; the next sweep will retry.
+4. Use the PR link above in your PR comment and in this Multica issue summary. The PR number must remain visible as \`owner/repo#num\`; the URL must be clickable for revisit/check-in.
 
-5. Do not coordinate with the other reviewer in advance. Independent verdicts are the point — the script reconciles.
+5. When all PRs are reviewed, post a one-line summary comment on this Multica issue and set status to \`in_review\`. If a PR errors out (auth, rate limit, vanished), note it in the summary; the next sweep will retry.
+
+6. If you produce action items (\`request-changes\` or \`block\`), do not @-mention another agent yourself. The sweep creates a CTO-assigned delegation issue after both independent reviews are reconciled.
+
+7. Do not coordinate with the other reviewer in advance. Independent verdicts are the point — the script reconciles.
 EOF
 )
 
   log "[dispatch] $agent: ${#items[@]} PR(s)"
-  printf '%s' "$description" | multica issue create \
+  if ! printf '%s' "$description" | multica issue create \
     --title "PR review batch — ${#items[@]} PR(s)" \
     --assignee "$agent" \
     --priority low \
     --description-stdin \
-    --output json >/dev/null
+    --output json >/dev/null; then
+    log "    [warn] dispatch_agent failed for $agent (continuing)"
+  fi
 }
 
 # ---------- Main ----------
@@ -220,6 +326,7 @@ while IFS= read -r repo; do
     [[ -z "$num" ]] && continue
     PRS_TOTAL=$((PRS_TOTAL + 1))
     pr_id="$GH_OWNER/$repo#$num@$sha"
+    pr_item="$(review_queue_item "$repo" "$num" "$sha")"
 
     # Skip self-authored PRs to avoid self-review loops.
     if [[ "$author" == "$HAO_AGENT" || "$author" == "$DUSTIN_AGENT" ]]; then
@@ -235,10 +342,13 @@ while IFS= read -r repo; do
     fi
 
     if is_docs_only "$repo" "$num"; then
-      post_pr_comment "$repo" "$num" "Docs-only PR — skipping code review.
+      if post_pr_comment "$repo" "$num" "Docs-only PR — skipping code review.
 
-<!-- consensus: $sha verdict: approve -->"
-      log "  [docs] $pr_id → consensus:approve"
+<!-- consensus: $sha verdict: approve -->"; then
+        log "  [docs] $pr_id → consensus:approve"
+      else
+        log "  [warn] docs-only consensus comment not written for $pr_id; next sweep will retry"
+      fi
       continue
     fi
 
@@ -248,14 +358,14 @@ while IFS= read -r repo; do
     if [[ -n "$hao_v" && -n "$dustin_v" ]]; then
       write_consensus "$repo" "$num" "$sha" "$hao_v" "$dustin_v"
     elif [[ -n "$hao_v" ]]; then
-      DUSTIN_QUEUE+=("$pr_id")
+      DUSTIN_QUEUE+=("$pr_item")
       log "  [need-dustin] $pr_id (hao=$hao_v)"
     elif [[ -n "$dustin_v" ]]; then
-      HAO_QUEUE+=("$pr_id")
+      HAO_QUEUE+=("$pr_item")
       log "  [need-hao] $pr_id (dustin=$dustin_v)"
     else
-      HAO_QUEUE+=("$pr_id")
-      DUSTIN_QUEUE+=("$pr_id")
+      HAO_QUEUE+=("$pr_item")
+      DUSTIN_QUEUE+=("$pr_item")
       log "  [need-both] $pr_id"
     fi
   done <<<"$prs_raw"

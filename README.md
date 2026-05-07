@@ -82,12 +82,16 @@ The team's automated code-review chain runs as a GitHub Action in this repo:
 | File | Role |
 |---|---|
 | `.github/workflows/pr-sweep.yml` | Cron schedule (`*/15 * * * *`) + invokes the script |
-| `.github/scripts/pr-sweep.sh` | Deterministic filter — enumerates open PRs across all non-archived `stone16/*` repos, decides which need review, dispatches batched Multica issues to Hao and Dustin |
+| `.github/scripts/pr-sweep.sh` | Deterministic filter — enumerates open PRs across all non-archived `stone16/*` repos, decides which need review, dispatches batched Multica issues to Hao and Dustin, and opens CTO delegation issues after actionable review outcomes |
 | `.pr-sweep-ignore` | Optional newline-separated list of repo names to exclude from the sweep |
 
 ### Why this shape
 
 The cost driver in agent-driven workflows is **agent invocations**, not script runs. By doing the deterministic filter (sentinel match, SHA compare, docs-only check) in the GH-Actions-hosted shell script, we only invoke Hao or Dustin when there is genuinely new code to review. Empty sweeps cost ~$0.
+
+The review prompt follows the Claude Code review shape we want to emulate: review the current PR head, focus on production-impacting bugs instead of style nits, require evidence in each finding, and leave a machine-readable marker after a real review. We keep that as Markdown prompt and Bash, not a new review service.
+
+Hao and Dustin are not a rotation. For every non-docs production-code PR, the sweep queues both reviewers when neither has reviewed the current SHA. If one reviewer has already posted a current sentinel, the sweep queues only the missing reviewer. Hao carries the general Senior Engineer code-quality lane; Dustin carries the security, performance, dependency-risk, and adversarial-input lane. Their required evidence bar is identical: surrounding context, `file:line` findings, production-impacting issues first, explicit verification status, strict verdict word, and no sentinel without a real review.
 
 ### Required GitHub Actions secrets
 
@@ -117,6 +121,8 @@ When both reviewers have written sentinels for the same SHA, the script writes o
 ```
 
 The next sweep skips PRs that already have a final sentinel for the current SHA. New commits invalidate the sentinel automatically (different SHA).
+
+If the reconciled outcome has action items (`request-changes`, `block`, or reviewer disagreement), the script creates one CTO-assigned Multica issue. That issue includes a clickable PR link, visible PR number, head commit, and both reviewer verdicts. This replaces free-text agent mentions: the simpler alternative was asking reviewers to remember to @ CTO, but that is easy to miss and conflicts with the no agent-to-agent mention rule.
 
 Reviewer behavior is in `agents/senior-engineer/skill.md` (Hao) and `agents/security-perf-reviewer/skill.md` (Dustin). Do not edit the sentinel format in only one place — change both, and re-sync to Multica via `multica skill update`.
 
