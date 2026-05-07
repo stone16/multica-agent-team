@@ -61,7 +61,12 @@ pr_changed_files() {
 
 post_pr_comment() {
   local body="$3"
-  printf '%s' "$body" | gh pr comment "$2" --repo "$GH_OWNER/$1" --body-file -
+  # Don't let a single comment-write failure (e.g., PAT lacks write scope on
+  # this repo, rate limit, vanished PR) abort the entire sweep. Log and move on.
+  if ! printf '%s' "$body" | gh pr comment "$2" --repo "$GH_OWNER/$1" --body-file - 2>&1; then
+    log "    [warn] post_pr_comment failed for $GH_OWNER/$1#$2 (continuing)"
+    return 0
+  fi
 }
 
 # ---------- Sentinel parsing ----------
@@ -70,10 +75,15 @@ post_pr_comment() {
 # exists in the body, else empty.
 sentinel_verdict() {
   local body="$1" name="$2" sha="$3"
+  # Pipeline returns 1 when grep finds no sentinel — that's the common
+  # case (most PRs have no review yet). The `|| true` keeps the function
+  # returning 0 with empty stdout so callers using `var=$(...)` under
+  # set -e -o pipefail don't blow up.
   printf '%s' "$body" \
     | grep -oE "${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+" \
     | tail -1 \
-    | sed -E "s/.*verdict:[[:space:]]*([a-z-]+).*/\1/"
+    | sed -E "s/.*verdict:[[:space:]]*([a-z-]+).*/\1/" \
+    || true
 }
 
 has_final_sentinel() {
@@ -181,6 +191,10 @@ declare -a DUSTIN_QUEUE=()
 REPOS=$(list_repos)
 log "[scan] enumerated $(echo "$REPOS" | wc -l | tr -d ' ') repos under $GH_OWNER/"
 
+REPOS_OK=0
+REPOS_ERRORED=0
+PRS_TOTAL=0
+
 while IFS= read -r repo; do
   [[ -z "$repo" ]] && continue
   if is_repo_ignored "$repo"; then
@@ -188,9 +202,23 @@ while IFS= read -r repo; do
     continue
   fi
 
+  # Capture stdout + stderr separately so PAT-scope errors don't kill the sweep.
+  if ! prs_raw=$(list_open_prs "$repo" 2>&1); then
+    log "[error] $repo: $prs_raw"
+    REPOS_ERRORED=$((REPOS_ERRORED + 1))
+    continue
+  fi
+  REPOS_OK=$((REPOS_OK + 1))
+
+  if [[ -z "$prs_raw" ]]; then
+    # Repo has zero open PRs. Don't spam the log per repo (we have many).
+    continue
+  fi
+
+  log "[scan] $repo"
   while IFS=$'\t' read -r num sha author; do
     [[ -z "$num" ]] && continue
-    body=$(pr_comments_body "$repo" "$num")
+    PRS_TOTAL=$((PRS_TOTAL + 1))
     pr_id="$GH_OWNER/$repo#$num@$sha"
 
     # Skip self-authored PRs to avoid self-review loops.
@@ -198,6 +226,8 @@ while IFS= read -r repo; do
       log "  [skip] $pr_id author=$author (self-review)"
       continue
     fi
+
+    body=$(pr_comments_body "$repo" "$num")
 
     if has_final_sentinel "$body" "$sha"; then
       log "  [done] $pr_id (consensus or debate already at this SHA)"
@@ -228,8 +258,10 @@ while IFS= read -r repo; do
       DUSTIN_QUEUE+=("$pr_id")
       log "  [need-both] $pr_id"
     fi
-  done < <(list_open_prs "$repo")
+  done <<<"$prs_raw"
 done <<<"$REPOS"
+
+log "[summary] repos_ok=$REPOS_OK repos_errored=$REPOS_ERRORED prs_seen=$PRS_TOTAL"
 
 # Bash 3 + set -u guards: don't deref empty arrays unsafely.
 dispatch_agent "$HAO_AGENT" "${HAO_QUEUE[@]+"${HAO_QUEUE[@]}"}"
