@@ -66,8 +66,9 @@ post_pr_comment() {
   # this repo, rate limit, vanished PR) abort the entire sweep. Log and move on.
   if ! printf '%s' "$body" | gh pr comment "$2" --repo "$GH_OWNER/$1" --body-file - 2>&1; then
     log "    [warn] post_pr_comment failed for $GH_OWNER/$1#$2 (continuing)"
-    return 0
+    return 1
   fi
+  return 0
 }
 
 pr_url() {
@@ -117,7 +118,7 @@ is_docs_only() {
   while IFS= read -r f; do
     [[ -z "$f" ]] && continue
     case "$f" in
-      *.md|*.markdown|*.txt|*.rst|*.adoc|docs/*|*/docs/*|.github/*.md) ;;
+      *.md|*.markdown|*.txt|*.rst|*.adoc|docs/*|*/docs/*) ;;
       *) return 1 ;;
     esac
   done <<<"$files"
@@ -130,22 +131,28 @@ write_consensus() {
   local repo="$1" num="$2" sha="$3" hao="$4" dustin="$5"
 
   if [[ "$hao" == "$dustin" ]]; then
-    post_pr_comment "$repo" "$num" "Consensus reached: $hao.
+    if post_pr_comment "$repo" "$num" "Consensus reached: $hao.
 
-<!-- consensus: $sha verdict: $hao -->"
-    log "    consensus=$hao"
-    if [[ "$hao" != "approve" ]]; then
-      dispatch_cto_delegation "$repo" "$num" "$sha" "consensus:$hao" "$hao" "$dustin"
+<!-- consensus: $sha verdict: $hao -->"; then
+      log "    consensus=$hao"
+      if [[ "$hao" != "approve" ]]; then
+        dispatch_cto_delegation "$repo" "$num" "$sha" "consensus:$hao" "$hao" "$dustin"
+      fi
+    else
+      log "    [warn] consensus comment not written for $GH_OWNER/$repo#$num; skipping CTO delegation until next sweep"
     fi
   else
-    post_pr_comment "$repo" "$num" "Reviewers disagree — escalating to human.
+    if post_pr_comment "$repo" "$num" "Reviewers disagree — escalating to human.
 
 - Hao (Senior Engineer): $hao
 - Dustin (Security & Performance Reviewer): $dustin
 
-<!-- debate: $sha -->"
-    log "    debate hao=$hao dustin=$dustin"
-    dispatch_cto_delegation "$repo" "$num" "$sha" "debate" "$hao" "$dustin"
+<!-- debate: $sha -->"; then
+      log "    debate hao=$hao dustin=$dustin"
+      dispatch_cto_delegation "$repo" "$num" "$sha" "debate" "$hao" "$dustin"
+    else
+      log "    [warn] debate comment not written for $GH_OWNER/$repo#$num; skipping CTO delegation until next sweep"
+    fi
   fi
 }
 
@@ -170,12 +177,14 @@ EOF
 )
 
   log "    cto-delegation=$CTO_AGENT $GH_OWNER/$repo#$num"
-  printf '%s' "$description" | multica issue create \
+  if ! printf '%s' "$description" | multica issue create \
     --title "PR review delegation needed — $GH_OWNER/$repo#$num" \
     --assignee "$CTO_AGENT" \
     --priority high \
     --description-stdin \
-    --output json >/dev/null
+    --output json >/dev/null; then
+    log "    [warn] dispatch_cto_delegation failed for $GH_OWNER/$repo#$num (continuing)"
+  fi
 }
 
 # ---------- Dispatch ----------
@@ -238,12 +247,14 @@ EOF
 )
 
   log "[dispatch] $agent: ${#items[@]} PR(s)"
-  printf '%s' "$description" | multica issue create \
+  if ! printf '%s' "$description" | multica issue create \
     --title "PR review batch — ${#items[@]} PR(s)" \
     --assignee "$agent" \
     --priority low \
     --description-stdin \
-    --output json >/dev/null
+    --output json >/dev/null; then
+    log "    [warn] dispatch_agent failed for $agent (continuing)"
+  fi
 }
 
 # ---------- Main ----------
@@ -299,10 +310,13 @@ while IFS= read -r repo; do
     fi
 
     if is_docs_only "$repo" "$num"; then
-      post_pr_comment "$repo" "$num" "Docs-only PR — skipping code review.
+      if post_pr_comment "$repo" "$num" "Docs-only PR — skipping code review.
 
-<!-- consensus: $sha verdict: approve -->"
-      log "  [docs] $pr_id → consensus:approve"
+<!-- consensus: $sha verdict: approve -->"; then
+        log "  [docs] $pr_id → consensus:approve"
+      else
+        log "  [warn] docs-only consensus comment not written for $pr_id; next sweep will retry"
+      fi
       continue
     fi
 

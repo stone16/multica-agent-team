@@ -27,8 +27,23 @@ assert_file_count() {
   [[ "$actual" == "$expected" ]] || fail "expected $expected issue descriptions, got $actual"
 }
 
+assert_status() {
+  local dir="$1"
+  local expected="$2"
+  local actual
+  actual="$(cat "$dir/captures/status")"
+  [[ "$actual" == "$expected" ]] || {
+    printf 'stdout:\n' >&2
+    sed -n '1,220p' "$dir/stdout.log" >&2
+    printf 'stderr:\n' >&2
+    sed -n '1,220p' "$dir/stderr.log" >&2
+    fail "expected exit status $expected, got $actual"
+  }
+}
+
 run_sweep_with_stubs() {
   local scenario="$1"
+  local expected_status="${PR_SWEEP_EXPECT_STATUS:-0}"
   local tmp
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/bin" "$tmp/captures"
@@ -55,7 +70,7 @@ if [[ "$1 $2" == "pr diff" ]]; then
 fi
 
 if [[ "$1 $2" == "pr view" ]]; then
-  if [[ "$scenario" == "reviewed-with-action-items" ]]; then
+  if [[ "$scenario" == "reviewed-with-action-items" || "$scenario" == "reviewed-with-action-items-comment-fails" ]]; then
     cat <<'COMMENTS'
 Verdict: request-changes
 
@@ -70,11 +85,30 @@ Performance findings:
 
 <!-- dustin-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
+  elif [[ "$scenario" == "reviewed-approve-approve" ]]; then
+    cat <<'COMMENTS'
+Verdict: approve
+
+What I checked:
+- src/app.ts:1 -- change is covered.
+
+<!-- hao-reviewed: deadbeef verdict: approve -->
+Verdict: approve
+
+Security findings: none.
+Performance findings: none.
+
+<!-- dustin-reviewed: deadbeef verdict: approve -->
+COMMENTS
   fi
   exit 0
 fi
 
 if [[ "$1 $2" == "pr comment" ]]; then
+  if [[ "${PR_SWEEP_PR_COMMENT_FAIL:-0}" == "1" ]]; then
+    printf 'simulated pr comment failure\n' >&2
+    exit 1
+  fi
   cat >"$PR_SWEEP_CAPTURE_DIR/pr-comment.md"
   exit 0
 fi
@@ -92,6 +126,11 @@ set -euo pipefail
   exit 64
 }
 
+if [[ "${PR_SWEEP_MULTICA_FAIL:-0}" == "1" ]]; then
+  printf 'simulated multica issue create failure\n' >&2
+  exit 1
+fi
+
 idx_file="$PR_SWEEP_CAPTURE_DIR/issue-count"
 idx=0
 if [[ -f "$idx_file" ]]; then
@@ -107,16 +146,29 @@ MULTICA
 
   chmod +x "$tmp/bin/gh" "$tmp/bin/multica"
 
+  set +e
   PR_SWEEP_TEST_SCENARIO="$scenario" \
-  PR_SWEEP_CAPTURE_DIR="$tmp/captures" \
-  LC_ALL=C \
-  LANG=C \
-  PATH="$tmp/bin:$PATH" \
-  GH_OWNER="stone16" \
-  HAO_AGENT="Hao" \
-  DUSTIN_AGENT="Dustin" \
-  CTO_AGENT="Stometa" \
-  bash "$SCRIPT" >"$tmp/stdout.log" 2>"$tmp/stderr.log"
+    PR_SWEEP_CAPTURE_DIR="$tmp/captures" \
+    PR_SWEEP_PR_COMMENT_FAIL="${PR_SWEEP_PR_COMMENT_FAIL:-0}" \
+    PR_SWEEP_MULTICA_FAIL="${PR_SWEEP_MULTICA_FAIL:-0}" \
+    LC_ALL=C \
+    LANG=C \
+    PATH="$tmp/bin:$PATH" \
+    GH_OWNER="stone16" \
+    HAO_AGENT="Hao" \
+    DUSTIN_AGENT="Dustin" \
+    CTO_AGENT="Stometa" \
+    bash "$SCRIPT" >"$tmp/stdout.log" 2>"$tmp/stderr.log"
+  status=$?
+  set -e
+  printf '%s' "$status" >"$tmp/captures/status"
+  [[ "$status" == "$expected_status" ]] || {
+    printf 'stdout:\n' >&2
+    sed -n '1,220p' "$tmp/stdout.log" >&2
+    printf 'stderr:\n' >&2
+    sed -n '1,220p' "$tmp/stderr.log" >&2
+    fail "expected sweep status $expected_status, got $status"
+  }
 
   printf '%s\n' "$tmp"
 }
@@ -145,6 +197,46 @@ test_cto_delegation_issue_created_for_actionable_consensus() {
   assert_contains "$tmp/captures/issue-1.description.md" "- Reviewer verdicts: Hao=request-changes, Dustin=request-changes"
 }
 
+test_no_cto_delegation_for_approve_consensus() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-approve-approve)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: approve -->"
+}
+
+test_no_cto_delegation_when_consensus_comment_fails() {
+  local tmp
+  tmp="$(PR_SWEEP_PR_COMMENT_FAIL=1 run_sweep_with_stubs reviewed-with-action-items-comment-fails)"
+
+  assert_status "$tmp" 0
+  assert_file_count "$tmp/captures" 0
+  assert_contains "$tmp/stderr.log" "[warn] post_pr_comment failed for stone16/sample-repo#12"
+}
+
+test_multica_dispatch_failure_does_not_abort_sweep() {
+  local tmp
+  tmp="$(PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs unreviewed)"
+
+  assert_status "$tmp" 0
+  assert_file_count "$tmp/captures" 0
+  assert_contains "$tmp/stderr.log" "[warn] dispatch_agent failed for Hao"
+  assert_contains "$tmp/stderr.log" "[warn] dispatch_agent failed for Dustin"
+}
+
+test_cto_delegation_failure_does_not_abort_sweep() {
+  local tmp
+  tmp="$(PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs reviewed-with-action-items)"
+
+  assert_status "$tmp" 0
+  assert_file_count "$tmp/captures" 0
+  assert_contains "$tmp/stderr.log" "[warn] dispatch_cto_delegation failed for stone16/sample-repo#12"
+}
+
 test_dispatch_prompt_includes_clickable_pr_links
 test_cto_delegation_issue_created_for_actionable_consensus
+test_no_cto_delegation_for_approve_consensus
+test_no_cto_delegation_when_consensus_comment_fails
+test_multica_dispatch_failure_does_not_abort_sweep
+test_cto_delegation_failure_does_not_abort_sweep
 printf 'PASS: pr-sweep prompt/delegation tests\n'
