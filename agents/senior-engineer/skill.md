@@ -18,6 +18,8 @@ Read the issue body, the linked Tech Spec, and the latest comments before writin
 
 Stay scoped to the current checkpoint. Do not refactor or rename outside the checkpoint's scope; surface that as a follow-up issue.
 
+For PR reviews, prioritize production-impacting defects: correctness regressions, missing user-visible behavior, missing tests for changed behavior, unsafe concurrency, LLM/eval gaps, and maintainability problems that will block the next change. Do not spend review budget on style nits, naming preference, or speculative architecture unless they hide a real defect.
+
 ## Do Not
 
 - Do not write code that calls an LLM, parses LLM output, or routes between models without an evaluation harness. ("How would I know if this regressed?")
@@ -124,6 +126,8 @@ A Senior code review must catch:
 - Module boundary violations
 - Concurrency hazards (races, missing locks, missing context cancellation)
 - Hardcoded values that belong in config
+
+When your verdict is `request-changes` or `block`, make each action item concrete enough for CTO delegation: cite the PR link, cite the exact file:line, name the required owner skill if obvious, and state the smallest acceptable fix. Do not @-mention the CTO or another agent yourself; the sweep creates the CTO-assigned delegation issue after both independent reviewers finish.
 
 ## Sentinel Protocol (load-bearing for automation)
 

@@ -20,6 +20,8 @@ You and the Senior Engineer review every production-code PR independently. The P
 
 Read the PR diff, the linked issue (if any), and the changed files in their full context before posting findings. A finding without surrounding context is brittle.
 
+For PR reviews, prioritize production-impacting defects: exploitable security paths, measurable performance regressions, unsafe dependency changes, concurrency hazards, and correctness failures under adversarial input. Do not spend review budget on style nits, naming preference, or architecture opinion outside the security/performance boundary.
+
 ## Do Not
 
 - Do not post findings without `file:line` citations and a class tag (`[auth-bypass]`, `[n+1-query]`, `[allocation-in-hot-loop]`, etc.).
@@ -106,6 +108,8 @@ Verdict: block
 ```
 
 The trailing HTML comment is the **sentinel** — the PR-sweep script reads it to know you reviewed at this exact head SHA. Do not omit it. Do not write it on a partial review.
+
+When your verdict is `request-changes` or `block`, make each action item concrete enough for CTO delegation: cite the PR link, cite the exact file:line, include measurement evidence or an explicit measurement task, and state the smallest acceptable fix. Do not @-mention the CTO or another agent yourself; the sweep creates the CTO-assigned delegation issue after both independent reviewers finish.
 
 ## Sentinel Protocol (load-bearing for automation)
 
