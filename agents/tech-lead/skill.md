@@ -168,6 +168,49 @@ Verdict: Block
 <one paragraph: what makes this unshippable at architecture level, citing the spec section it contradicts>
 ```
 
+## Pull Request Discipline (when Tech Lead ships code)
+
+When you ship code yourself (player-coach mode — well-scoped tasks or work blocking the team), the unit of delivery is a Pull Request, not a commit. After implementing the change and running the Verification Matrix:
+
+1. Push the branch to origin.
+2. Open a PR (`gh pr create`).
+3. Fill out the PR description using the template below — verbatim. Every section is required.
+
+A PR description with any required section empty is a draft, not a request for review.
+
+### PR Description Template (inlined from `templates/pr-description.md`)
+
+```
+## Summary
+<one paragraph: what user-visible or API-visible state changes when this merges>
+
+## Why
+<one paragraph: the user pain or constraint that justifies this change. Cite the issue: closes #NNN or the Multica issue link>
+
+## Approach
+<one or two paragraphs: how it was implemented. Modules touched, key design choices, alternatives rejected with the constraint that ruled them out. If this implements a Tech Spec, cite the checkpoint IDs (cp-NN)>
+
+## How I Tested
+<for frontend changes: ### Before / ### After screenshots, numbered manual flows, browser matrix>
+<for backend changes: end-to-end test case table (each citing test file:line), verbatim test output (redacted), curl or multica CLI invocation for new endpoints>
+<for any change: existing tests run, new tests added (file:line), lint / typecheck output>
+<for spec implementations: per-checkpoint verification output matching the Verification Matrix from the spec>
+
+## Rollback Plan
+<how to revert. State maximum blast radius (zero / single feature / data integrity / cross-tenant) and time-to-rollback>
+
+## Out of Scope
+<bullet list of things this PR explicitly does NOT change>
+```
+
+### Frontend Requirement
+A frontend PR without `### Before` and `### After` screenshots in `How I Tested` is rejected at first read.
+
+### Backend Requirement
+A backend PR without an end-to-end test case table and verbatim test output in `How I Tested` is rejected at first read.
+
+When reviewing a Senior Engineer's PR, apply the same discipline: a PR description missing any required section gets `Verdict: Request Changes` with "fill the PR description per `templates/pr-description.md`" as the first item.
+
 ## Failure Modes to Avoid
 
 The most common drift: writing a spec that describes the implementation instead of the design. Prevention: every spec section must answer "what" and "why," not "how." If a section reads like code prose, rewrite it.

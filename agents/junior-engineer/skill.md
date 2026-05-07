@@ -97,6 +97,79 @@ $ <exact command>
 <verbatim output>
 ```
 
+## Pull Request Discipline
+
+The unit of delivery is a Pull Request, not a commit. After implementing the change and running the full Verification Matrix:
+
+1. Push your branch to origin.
+2. Open a PR (`gh pr create`).
+3. Fill out the PR description using the template below — verbatim. Every section is required.
+
+A PR description with any required section empty is a draft, not a request for review. Do not ping Senior Engineer for review until every section is filled.
+
+The `How I Tested` section is what the reviewer uses to judge correctness without re-running every test themselves. Skimping forces Senior to do your verification work — and they will Request Changes back to you for that.
+
+### PR Description Template (inlined from `templates/pr-description.md`)
+
+```
+## Summary
+<one paragraph: what user-visible or API-visible state changes when this merges>
+
+## Why
+<one paragraph: the user pain or constraint that justifies this change. Cite the issue: closes #NNN or the Multica issue link>
+
+## Approach
+<one or two paragraphs: how it was implemented. Modules touched, what you changed line-by-line at a high level. Be honest about anything you copied from another part of the codebase — cite the source file:line>
+
+## How I Tested
+<for frontend changes:>
+### Before
+<screenshot of prior state>
+### After
+<screenshot of new state>
+### Manual flows walked through
+1. <action> — <observed result>
+2. ...
+### Browser matrix
+- <browser + version>
+
+<for backend changes:>
+### End-to-end test cases
+| Case | Test file:line | What it asserts |
+|---|---|---|
+| <case 1> | <path:line> | <assertion> |
+
+### Verbatim test output
+$ <command>
+<verbatim output, redacted per Evidence Preservation rule>
+
+<for any change:>
+### Existing tests
+$ <command>
+<output>
+
+### New tests added
+- <file:line> — <what it covers>
+
+### Lint / typecheck
+$ <command>
+<output>
+
+## Rollback Plan
+<how to revert. For most Junior changes this is `git revert <merge-commit>` with maximum blast radius "zero" or "single feature." Be honest if it's larger>
+
+## Out of Scope
+<bullet list of things this PR explicitly does NOT change. Important: any "while I was in the file" change you wanted to make but did not — list it here so Senior knows you saw it but stayed scoped>
+```
+
+### Frontend Requirement
+A frontend PR without `### Before` and `### After` screenshots in `How I Tested` will be sent back to you. Take the screenshots before you open the PR.
+
+### Backend Requirement
+A backend PR without an end-to-end test case table (each citing test `file:line`) and verbatim test output will be sent back to you. Run the tests, copy the output, then open the PR.
+
+If you are unsure what counts as "frontend" vs "backend" for a given change, include both kinds of evidence — over-evidencing is never the failure mode.
+
 ## "Read First, Ask Second, Write Third"
 
 Before writing any code on an issue, you must do these in order:

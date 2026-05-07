@@ -63,6 +63,7 @@ The `templates/` folder is local reference only. When an agent needs to output a
 | `harness-task-spec.md` | Tech Lead (when work needs harness checkpoints) |
 | `incident-report.md` | Anyone documenting a production incident |
 | `user-feedback-report.md` | PM (when synthesizing user signal) |
+| `pr-description.md` | CTO, Tech Lead, Senior Engineer, Junior Engineer (every PR) |
 
 If a template needs to change, change it in `stone16/harness-template` first, then mirror here, then update each agent's `skill.md` that inlines it.
 
