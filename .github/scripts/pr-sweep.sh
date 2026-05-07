@@ -131,17 +131,24 @@ write_consensus() {
   local repo="$1" num="$2" sha="$3" hao="$4" dustin="$5"
 
   if [[ "$hao" == "$dustin" ]]; then
+    if [[ "$hao" != "approve" ]] && ! dispatch_cto_delegation "$repo" "$num" "$sha" "consensus:$hao" "$hao" "$dustin"; then
+      log "    [warn] consensus delegation not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
+      return 0
+    fi
+
     if post_pr_comment "$repo" "$num" "Consensus reached: $hao.
 
 <!-- consensus: $sha verdict: $hao -->"; then
       log "    consensus=$hao"
-      if [[ "$hao" != "approve" ]]; then
-        dispatch_cto_delegation "$repo" "$num" "$sha" "consensus:$hao" "$hao" "$dustin"
-      fi
     else
-      log "    [warn] consensus comment not written for $GH_OWNER/$repo#$num; skipping CTO delegation until next sweep"
+      log "    [warn] consensus comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
     fi
   else
+    if ! dispatch_cto_delegation "$repo" "$num" "$sha" "debate" "$hao" "$dustin"; then
+      log "    [warn] debate delegation not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
+      return 0
+    fi
+
     if post_pr_comment "$repo" "$num" "Reviewers disagree — escalating to human.
 
 - Hao (Senior Engineer): $hao
@@ -149,17 +156,40 @@ write_consensus() {
 
 <!-- debate: $sha -->"; then
       log "    debate hao=$hao dustin=$dustin"
-      dispatch_cto_delegation "$repo" "$num" "$sha" "debate" "$hao" "$dustin"
     else
-      log "    [warn] debate comment not written for $GH_OWNER/$repo#$num; skipping CTO delegation until next sweep"
+      log "    [warn] debate comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
     fi
   fi
+}
+
+cto_delegation_title() {
+  local repo="$1" num="$2" sha="$3"
+  printf 'PR review delegation needed — %s/%s#%s@%s' "$GH_OWNER" "$repo" "$num" "$sha"
+}
+
+cto_delegation_exists() {
+  local title="$1"
+  local issues
+
+  if ! issues=$(multica issue list --limit 100 --output json 2>/dev/null); then
+    log "    [warn] cto_delegation_exists failed; will try creating delegation"
+    return 1
+  fi
+
+  printf '%s' "$issues" | grep -Fq "$title"
 }
 
 dispatch_cto_delegation() {
   local repo="$1" num="$2" sha="$3" outcome="$4" hao="$5" dustin="$6"
   local link
   link="$(pr_markdown_link "$repo" "$num")"
+  local title
+  title="$(cto_delegation_title "$repo" "$num" "$sha")"
+
+  if cto_delegation_exists "$title"; then
+    log "    cto-delegation=exists $GH_OWNER/$repo#$num@$sha"
+    return 0
+  fi
 
   local description
   description=$(cat <<EOF
@@ -178,13 +208,15 @@ EOF
 
   log "    cto-delegation=$CTO_AGENT $GH_OWNER/$repo#$num"
   if ! printf '%s' "$description" | multica issue create \
-    --title "PR review delegation needed — $GH_OWNER/$repo#$num" \
+    --title "$title" \
     --assignee "$CTO_AGENT" \
     --priority high \
     --description-stdin \
     --output json >/dev/null; then
     log "    [warn] dispatch_cto_delegation failed for $GH_OWNER/$repo#$num (continuing)"
+    return 1
   fi
+  return 0
 }
 
 # ---------- Dispatch ----------

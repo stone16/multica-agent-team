@@ -122,6 +122,14 @@ GH
 set -euo pipefail
 
 [[ "$1 $2" == "issue create" ]] || {
+  if [[ "$1 $2" == "issue list" ]]; then
+    if [[ "${PR_SWEEP_EXISTING_DELEGATION:-0}" == "1" ]]; then
+      printf '[{"title":"PR review delegation needed — stone16/sample-repo#12@deadbeef"}]\n'
+    else
+      printf '[]\n'
+    fi
+    exit 0
+  fi
   printf 'unexpected multica invocation: %s\n' "$*" >&2
   exit 64
 }
@@ -151,6 +159,7 @@ MULTICA
     PR_SWEEP_CAPTURE_DIR="$tmp/captures" \
     PR_SWEEP_PR_COMMENT_FAIL="${PR_SWEEP_PR_COMMENT_FAIL:-0}" \
     PR_SWEEP_MULTICA_FAIL="${PR_SWEEP_MULTICA_FAIL:-0}" \
+    PR_SWEEP_EXISTING_DELEGATION="${PR_SWEEP_EXISTING_DELEGATION:-0}" \
     LC_ALL=C \
     LANG=C \
     PATH="$tmp/bin:$PATH" \
@@ -191,6 +200,7 @@ test_cto_delegation_issue_created_for_actionable_consensus() {
 
   assert_file_count "$tmp/captures" 1
   assert_contains "$tmp/captures/issue-1.args" "--assignee Stometa"
+  assert_contains "$tmp/captures/issue-1.args" "PR review delegation needed — stone16/sample-repo#12@deadbeef"
   assert_contains "$tmp/captures/issue-1.description.md" "CTO delegation needed for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12)."
   assert_contains "$tmp/captures/issue-1.description.md" "- PR: [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12)"
   assert_contains "$tmp/captures/issue-1.description.md" "- Head commit: deadbeef"
@@ -205,12 +215,13 @@ test_no_cto_delegation_for_approve_consensus() {
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: approve -->"
 }
 
-test_no_cto_delegation_when_consensus_comment_fails() {
+test_existing_delegation_prevents_duplicate_when_final_comment_fails() {
   local tmp
   tmp="$(PR_SWEEP_PR_COMMENT_FAIL=1 run_sweep_with_stubs reviewed-with-action-items-comment-fails)"
 
   assert_status "$tmp" 0
-  assert_file_count "$tmp/captures" 0
+  assert_file_count "$tmp/captures" 1
+  [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "final PR sentinel unexpectedly succeeded"
   assert_contains "$tmp/stderr.log" "[warn] post_pr_comment failed for stone16/sample-repo#12"
 }
 
@@ -230,13 +241,25 @@ test_cto_delegation_failure_does_not_abort_sweep() {
 
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 0
+  [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "final PR sentinel was written even though CTO delegation failed"
   assert_contains "$tmp/stderr.log" "[warn] dispatch_cto_delegation failed for stone16/sample-repo#12"
+}
+
+test_existing_cto_delegation_allows_final_comment_without_duplicate() {
+  local tmp
+  tmp="$(PR_SWEEP_EXISTING_DELEGATION=1 PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs reviewed-with-action-items)"
+
+  assert_status "$tmp" 0
+  assert_file_count "$tmp/captures" 0
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
+  assert_contains "$tmp/stderr.log" "cto-delegation=exists stone16/sample-repo#12@deadbeef"
 }
 
 test_dispatch_prompt_includes_clickable_pr_links
 test_cto_delegation_issue_created_for_actionable_consensus
 test_no_cto_delegation_for_approve_consensus
-test_no_cto_delegation_when_consensus_comment_fails
+test_existing_delegation_prevents_duplicate_when_final_comment_fails
 test_multica_dispatch_failure_does_not_abort_sweep
 test_cto_delegation_failure_does_not_abort_sweep
+test_existing_cto_delegation_allows_final_comment_without_duplicate
 printf 'PASS: pr-sweep prompt/delegation tests\n'
