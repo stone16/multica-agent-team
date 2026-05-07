@@ -7,6 +7,8 @@ The unit of delivery is a Pull Request, not a commit. Code-shipping agents (CTO,
 A PR description with any required section empty is a draft, not a request for review.
 Open GitHub PRs as **Ready for review**, never as Draft PRs. If the body is not ready, do not open the PR yet. If GitHub creates the PR as draft anyway, run `gh pr ready` before handing it off.
 
+Originating Multica issue: [STO-42](mention://issue/<uuid>)
+
 ---
 
 ## Summary

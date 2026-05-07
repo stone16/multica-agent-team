@@ -12,6 +12,7 @@
 #        - only one reviewed → enqueue the other
 #        - neither reviewed → enqueue both
 #   4. If queues non-empty, create one Multica issue per agent with the PR list
+#   5. If review reconciliation is actionable, notify the originating issue
 #
 # No LLM is invoked here. Hao / Dustin only run when the queues actually have work.
 
@@ -21,6 +22,7 @@ GH_OWNER="${GH_OWNER:-stone16}"
 HAO_AGENT="${HAO_AGENT:-Hao}"
 DUSTIN_AGENT="${DUSTIN_AGENT:-Dustin}"
 CTO_AGENT="${CTO_AGENT:-Stometa}"
+CTO_MENTION="${CTO_MENTION:-[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -54,6 +56,11 @@ list_open_prs() {
 pr_comments_body() {
   gh pr view "$2" --repo "$GH_OWNER/$1" --json comments \
     --jq '.comments[].body' 2>/dev/null || true
+}
+
+pr_body() {
+  gh pr view "$2" --repo "$GH_OWNER/$1" --json body \
+    --jq '.body // ""' 2>/dev/null || true
 }
 
 pr_changed_files() {
@@ -106,6 +113,132 @@ has_final_sentinel() {
   printf '%s' "$body" | grep -qE "(consensus|debate):[[:space:]]*${sha}\\b"
 }
 
+# ---------- Origin issue dispatch ----------
+
+origin_issue_id_from_body() {
+  local body="$1"
+  printf '%s\n' "$body" \
+    | sed -nE 's/.*mention:\/\/issue\/([0-9a-fA-F-]{36}).*/\1/p' \
+    | head -1
+}
+
+missing_origin_marker() {
+  local sha="$1"
+  printf '<!-- multica-origin-missing: %s -->' "$sha"
+}
+
+origin_dispatch_marker() {
+  local sha="$1"
+  printf '<!-- multica-review-dispatched: %s -->' "$sha"
+}
+
+post_missing_origin_warning() {
+  local repo="$1" num="$2" sha="$3"
+  local marker
+  marker="$(missing_origin_marker "$sha")"
+  local comments
+  comments="$(pr_comments_body "$repo" "$num")"
+
+  if printf '%s' "$comments" | grep -Fq "$marker"; then
+    log "    origin-link=missing-warning-exists $GH_OWNER/$repo#$num@$sha"
+    return 1
+  fi
+
+  post_pr_comment "$repo" "$num" "Originating Multica issue link is missing.
+
+Add this near the top of the PR body:
+
+\`Originating Multica issue: [STO-42](mention://issue/<uuid>)\`
+
+The PR sweep will retry Multica dispatch on the next run after the body is fixed.
+
+$marker" >/dev/null || true
+  return 1
+}
+
+origin_issue_comment_exists() {
+  local issue_id="$1" repo="$2" num="$3" sha="$4"
+  local marker comments
+  marker="$(origin_dispatch_marker "$sha")"
+
+  if ! comments=$(multica issue comment list "$issue_id" --limit 100 --output json 2>/dev/null); then
+    log "    [warn] origin_issue_comment_exists failed; will try posting origin comment"
+    return 1
+  fi
+
+  if printf '%s' "$comments" | grep -Fq "$marker"; then
+    log "    origin-comment=exists $issue_id $GH_OWNER/$repo#$num@$sha"
+    return 0
+  fi
+  return 1
+}
+
+strip_review_sentinel() {
+  local name="$1" sha="$2"
+  sed -E "/<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+[[:space:]]*-->/d"
+}
+
+review_comment_body() {
+  local repo="$1" num="$2" name="$3" sha="$4"
+  local jq_filter
+  jq_filter="[.comments[] | select(.body | contains(\"${name}: ${sha}\")) | .body][-1] // \"\""
+
+  gh pr view "$num" --repo "$GH_OWNER/$repo" --json comments --jq "$jq_filter" 2>/dev/null \
+    | strip_review_sentinel "$name" "$sha" \
+    || true
+}
+
+post_origin_issue_comment() {
+  local issue_id="$1" repo="$2" num="$3" sha="$4" outcome="$5" hao="$6" dustin="$7"
+  local link marker hao_body dustin_body comment
+  link="$(pr_url "$repo" "$num")"
+  marker="$(origin_dispatch_marker "$sha")"
+  hao_body="$(review_comment_body "$repo" "$num" "hao-reviewed" "$sha")"
+  dustin_body="$(review_comment_body "$repo" "$num" "dustin-reviewed" "$sha")"
+
+  comment=$(cat <<EOF
+$CTO_MENTION PR review needs routing.
+
+- PR: $link
+- Head commit: $sha
+- Final verdict: $outcome
+- Hao verdict: $hao
+- Dustin verdict: $dustin
+
+## Hao Review
+
+$hao_body
+
+## Dustin Review
+
+$dustin_body
+
+$marker
+EOF
+)
+
+  log "    origin-comment=post $issue_id $GH_OWNER/$repo#$num@$sha"
+  if ! printf '%s' "$comment" | multica issue comment add "$issue_id" --content-stdin >/dev/null; then
+    log "    [warn] post_origin_issue_comment failed for $GH_OWNER/$repo#$num (continuing)"
+    return 1
+  fi
+  return 0
+}
+
+dispatch_origin_issue_comment() {
+  local repo="$1" num="$2" sha="$3" outcome="$4" hao="$5" dustin="$6"
+  local issue_id
+  issue_id="$(origin_issue_id_from_body "$(pr_body "$repo" "$num")")"
+
+  if [[ -z "$issue_id" ]]; then
+    post_missing_origin_warning "$repo" "$num" "$sha"
+    return 1
+  fi
+
+  origin_issue_comment_exists "$issue_id" "$repo" "$num" "$sha" \
+    || post_origin_issue_comment "$issue_id" "$repo" "$num" "$sha" "$outcome" "$hao" "$dustin"
+}
+
 # ---------- Filters ----------
 
 # True if every changed file is documentation. Lets us skip code-review on
@@ -131,8 +264,8 @@ write_consensus() {
   local repo="$1" num="$2" sha="$3" hao="$4" dustin="$5"
 
   if [[ "$hao" == "$dustin" ]]; then
-    if [[ "$hao" != "approve" ]] && ! dispatch_cto_delegation "$repo" "$num" "$sha" "consensus:$hao" "$hao" "$dustin"; then
-      log "    [warn] consensus delegation not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
+    if [[ "$hao" != "approve" ]] && ! dispatch_origin_issue_comment "$repo" "$num" "$sha" "consensus: $hao" "$hao" "$dustin"; then
+      log "    [warn] origin issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
       return 0
     fi
 
@@ -144,8 +277,8 @@ write_consensus() {
       log "    [warn] consensus comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
     fi
   else
-    if ! dispatch_cto_delegation "$repo" "$num" "$sha" "debate" "$hao" "$dustin"; then
-      log "    [warn] debate delegation not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
+    if ! dispatch_origin_issue_comment "$repo" "$num" "$sha" "debate" "$hao" "$dustin"; then
+      log "    [warn] origin issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
       return 0
     fi
 
@@ -160,63 +293,6 @@ write_consensus() {
       log "    [warn] debate comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
     fi
   fi
-}
-
-cto_delegation_title() {
-  local repo="$1" num="$2" sha="$3"
-  printf 'PR review delegation needed — %s/%s#%s@%s' "$GH_OWNER" "$repo" "$num" "$sha"
-}
-
-cto_delegation_exists() {
-  local title="$1"
-  local issues
-
-  if ! issues=$(multica issue list --limit 100 --output json 2>/dev/null); then
-    log "    [warn] cto_delegation_exists failed; will try creating delegation"
-    return 1
-  fi
-
-  printf '%s' "$issues" | grep -Fq "$title"
-}
-
-dispatch_cto_delegation() {
-  local repo="$1" num="$2" sha="$3" outcome="$4" hao="$5" dustin="$6"
-  local link
-  link="$(pr_markdown_link "$repo" "$num")"
-  local title
-  title="$(cto_delegation_title "$repo" "$num" "$sha")"
-
-  if cto_delegation_exists "$title"; then
-    log "    cto-delegation=exists $GH_OWNER/$repo#$num@$sha"
-    return 0
-  fi
-
-  local description
-  description=$(cat <<EOF
-CTO delegation needed for $link.
-
-- PR: $link
-- Head commit: $sha
-- Review outcome: $outcome
-- Reviewer verdicts: Hao=$hao, Dustin=$dustin
-
-Review the PR comments, decide whether the findings are correct, then delegate fixes to the right engineer. If the review is wrong, leave the correction on the PR and close this issue.
-
-This issue is assigned to the CTO instead of relying on reviewer-written agent mentions. Manual agent mentions are easy to miss and can create loops; assignment gives one deterministic notification point after review action items exist.
-EOF
-)
-
-  log "    cto-delegation=$CTO_AGENT $GH_OWNER/$repo#$num"
-  if ! printf '%s' "$description" | multica issue create \
-    --title "$title" \
-    --assignee "$CTO_AGENT" \
-    --priority high \
-    --description-stdin \
-    --output json >/dev/null; then
-    log "    [warn] dispatch_cto_delegation failed for $GH_OWNER/$repo#$num (continuing)"
-    return 1
-  fi
-  return 0
 }
 
 # ---------- Dispatch ----------
@@ -272,7 +348,7 @@ Operational reminders:
 
 5. When all PRs are reviewed, post a one-line summary comment on this Multica issue and set status to \`in_review\`. If a PR errors out (auth, rate limit, vanished), note it in the summary; the next sweep will retry.
 
-6. If you produce action items (\`request-changes\` or \`block\`), do not @-mention another agent yourself. The sweep creates a CTO-assigned delegation issue after both independent reviews are reconciled.
+6. If you produce action items (\`request-changes\` or \`block\`), do not @-mention another agent yourself. The sweep posts the reconciled outcome back to the originating Multica issue after both independent reviews are reconciled.
 
 7. Do not coordinate with the other reviewer in advance. Independent verdicts are the point — the script reconciles.
 EOF
