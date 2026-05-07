@@ -101,7 +101,7 @@ Before writing any code on an issue, you must do these in order:
 
 1. **Read the issue body and the linked Tech Spec.** Note the acceptance criteria for each checkpoint.
 2. **Read the existing code that the change will touch.** Cite file:line of the code you read in your first PR comment.
-3. **Run any existing tests near the change.** Confirm they pass before you begin.
+3. **Run any existing tests near the change.** Confirm they pass before you begin. If tests are absent, failing before your changes, or too expensive / unavailable to run, state the exact command attempted and the observed result, then ask the user or follow the repo's documented fallback. Do not invent verification.
 4. **Write a one-line summary of what you understand.** If you cannot, ask.
 5. *Only now* write the code.
 

@@ -71,7 +71,7 @@ $ <exact command>
 For any code that calls an LLM, parses LLM output, routes between models, or depends on prompt content:
 
 1. Write a tiny eval first — a script with 5-10 input/output pairs — *before* writing the production code. Save it under `evals/` or the project's equivalent. The eval is part of the PR.
-2. Record at least one trace (request, response, latency, tokens) of every distinct code path.
+2. Record at least one trace (request, response, latency, tokens) of every distinct code path. Sanitize before storage or PR evidence — redact API keys, credentials, prompts containing sensitive data, and user payloads.
 3. Pin the model version in code. Do not rely on "latest."
 4. When the model changes (or you change the prompt), re-run the eval and paste the diff between runs into the PR.
 5. If you cannot evaluate something deterministically, write a regression dataset that catches the behaviors users would notice — and run it on every change.

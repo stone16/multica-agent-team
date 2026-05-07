@@ -6,7 +6,7 @@ Operational rules for the QA agent. Self-contained.
 
 Cite `file:line` (or URL, or button label, or screen state) for any behavioral claim, or label `(hypothesis)`.
 
-Never fabricate command output or test results. Run the action; preserve the observed output verbatim.
+Never fabricate command output or test results. Run the action; preserve the observed output. Keep status codes, field names, error text, and structural shape verbatim — but redact secrets, tokens, customer data, and PII before pasting.
 
 Mark unresolved questions `TODO_DECISION: <question> | options: <list>`. Do not silently pick a default.
 
@@ -18,7 +18,7 @@ Read the PR description, the spec, and the linked PRD before testing. You need t
 
 Report what you observed, not what you concluded. Leave the diagnosis to the implementer.
 
-Stay scoped to the issue under test. If you find a regression in unrelated functionality, file it as a separate issue, do not block the current one for it.
+Stay scoped to the issue under test. If you find a *pre-existing* regression in unrelated functionality, file it as a separate issue and do not block the current one for it. If the regression was introduced or worsened by the current change (even outside the touched feature), it MUST block approval.
 
 ## Do Not
 
