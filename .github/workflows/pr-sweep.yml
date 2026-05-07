@@ -1,0 +1,62 @@
+name: PR Sweep
+
+# Periodically scans open PRs across stone16/* and dispatches code-review work to
+# Senior Engineer (Hao) and Security & Performance Reviewer (Dustin) when needed.
+# Filtering is deterministic shell — no LLM is invoked unless real review work exists.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Avoid overlapping sweeps. If a sweep is still running when the next cron tick
+# fires, the new run is queued, not started in parallel — prevents duplicate
+# Multica issue creation for the same PR.
+concurrency:
+  group: pr-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_PAT: ${{ secrets.GH_PAT }}
+      MULTICA_TOKEN: ${{ secrets.MULTICA_TOKEN }}
+      GH_OWNER: stone16
+      HAO_AGENT: Hao
+      DUSTIN_AGENT: Dustin
+    steps:
+      - name: Check required secrets are present
+        run: |
+          set -e
+          if [ -z "$GH_PAT" ]; then
+            echo "::error::GH_PAT secret is not configured. Generate a GitHub PAT with 'repo' scope and add it to repo secrets."
+            exit 1
+          fi
+          if [ -z "$MULTICA_TOKEN" ]; then
+            echo "::error::MULTICA_TOKEN secret is not configured. Generate a Multica PAT and add it to repo secrets."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install multica CLI
+        run: |
+          curl -fsSL https://multica.dev/install.sh | sh
+          echo "$HOME/.multica/bin" >> "$GITHUB_PATH"
+
+      - name: Authenticate multica
+        run: multica login --token "$MULTICA_TOKEN"
+
+      - name: Authenticate gh (with cross-repo PAT)
+        run: |
+          printf '%s' "$GH_PAT" | gh auth login --with-token
+          gh auth status
+
+      - name: Run PR sweep
+        run: ./.github/scripts/pr-sweep.sh
