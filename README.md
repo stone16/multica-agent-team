@@ -7,7 +7,7 @@ Per-agent personality + skill markdown for an 8-agent product team operating on 
 | Path | Purpose | Maps to in Multica |
 |---|---|---|
 | `workspace-context.md` | Team constitution, applies to every agent | `workspace.context` field |
-| `agents/<role>/personality.md` | Agent persona — narrative, second-person, written in CrewAI style | `agent.instructions` field |
+| `agents/<role>/personality.md` | Agent persona in 4 sections: Identity / Personal Goal / Touchstone / Constraints. Narrative for the first three; imperative bullets for Constraints | `agent.instructions` field |
 | `agents/<role>/skill.md` | Agent operational rules — imperative, written in harness-template style. Self-contained per agent (no cross-references) | One Multica skill, mounted on this agent |
 | `templates/*.md` | Local reference copies of `stone16/harness-template` artifact templates. Not synced to Multica — agents inline them in their own `skill.md` | — |
 
@@ -37,12 +37,17 @@ Each agent is two files. No shared skills, no cross-file references — every ru
 
 ## Style Conventions
 
-| File | Style | Inspired by |
-|---|---|---|
-| `personality.md` | Second-person narrative, multi-sentence, persona | CrewAI's `role_playing` template (`"You are {role}. {backstory}"`) |
-| `skill.md` | Imperative one-liners, tables for lookup, explicit Do Not | `stone16/harness-template` AGENTS.md |
+| File | Sections | Style | Inspired by |
+|---|---|---|---|
+| `personality.md` | Identity / Personal Goal / Touchstone / Constraints | First three are narrative (CrewAI-style second-person prose); Constraints is imperative bullets (positive + negative mixed) | CrewAI's `role_playing` template + `stone16/harness-template` AGENTS.md |
+| `skill.md` | Hard Rules / Do Not / Triggers / Output formats / Examples | All imperative; tables for lookup surfaces | `stone16/harness-template` AGENTS.md |
 
-These two styles are deliberately different. Persona is "who you are" (narrative). Skill is "what you do" (rules). LLMs respond to the two signals through different processing paths; combining them outperforms either alone.
+The two files cover different scopes:
+
+- **Personality `Constraints`** are **identity-level** — what kind of person/role you are ("Do not write code" because you are PM, not engineer).
+- **Skill `Do Not`** are **operational-level** — Multica platform and process rules ("Do not @-mention another agent" because that triggers an agent-to-agent loop).
+
+Some duplication is acceptable; it reinforces the rule across persona and procedure layers.
 
 ## Templates
 

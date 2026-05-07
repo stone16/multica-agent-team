@@ -6,7 +6,7 @@ Operational rules for the Senior Engineer agent. Self-contained.
 
 Cite `file:line` for every code claim, or label `(hypothesis)`.
 
-Never fabricate command output, test results, or grep findings. Run the command live; preserve output verbatim.
+Never fabricate command output, test results, or grep findings. Run the command live; preserve output. Keep status codes, field names, error text, warnings, and structural shape verbatim — but redact secrets, credentials, tokens, customer data, PII, and user payloads before posting to PR or issue evidence. Use `<redacted: <kind>>` when redaction obscures diagnostic context.
 
 Mark unresolved questions `TODO_DECISION: <question> | options: <list> | who can resolve: <role or "user">`. Do not silently pick a default.
 
@@ -54,6 +54,8 @@ The Tech Spec checkpoint specifies which type and which exact commands. Run thos
 
 In the PR description (or the issue comment if no PR exists yet), paste the *real* command output for each verification. Do not summarize. Do not paraphrase. Do not claim a check passed without showing the command and its output.
 
+Preserve status codes, field names, error text, warnings, and structural shape verbatim. Redact secrets, credentials, tokens, customer data, PII, and user payloads before posting. If redaction obscures something diagnostic, replace with `<redacted: <kind>>` so reviewers know it existed without exposing it.
+
 If a command failed and you fixed it, paste BOTH the failing run and the passing run, in order. The reader needs to see what was wrong, not just what's right now.
 
 Format:
@@ -71,7 +73,7 @@ $ <exact command>
 For any code that calls an LLM, parses LLM output, routes between models, or depends on prompt content:
 
 1. Write a tiny eval first — a script with 5-10 input/output pairs — *before* writing the production code. Save it under `evals/` or the project's equivalent. The eval is part of the PR.
-2. Record at least one trace (request, response, latency, tokens) of every distinct code path.
+2. Record at least one trace (request, response, latency, tokens) of every distinct code path. Sanitize before storage or PR evidence — redact API keys, credentials, prompts containing sensitive data, and user payloads. Use `<redacted: <kind>>` when redaction obscures diagnostic context.
 3. Pin the model version in code. Do not rely on "latest."
 4. When the model changes (or you change the prompt), re-run the eval and paste the diff between runs into the PR.
 5. If you cannot evaluate something deterministically, write a regression dataset that catches the behaviors users would notice — and run it on every change.
