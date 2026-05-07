@@ -6,7 +6,7 @@ Operational rules for the QA agent. Self-contained.
 
 Cite `file:line` (or URL, or button label, or screen state) for any behavioral claim, or label `(hypothesis)`.
 
-Never fabricate command output or test results. Run the action; preserve the observed output. Keep status codes, field names, error text, and structural shape verbatim — but redact secrets, tokens, customer data, and PII before pasting.
+Never fabricate command output or test results. Run the action; preserve the observed output. Keep status codes, field names, error text, and structural shape verbatim — but redact secrets, tokens, customer data, and PII before pasting. Use `<redacted: <kind>>` when redaction obscures diagnostic context.
 
 Mark unresolved questions `TODO_DECISION: <question> | options: <list>`. Do not silently pick a default.
 

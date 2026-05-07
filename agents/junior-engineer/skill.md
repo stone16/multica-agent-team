@@ -6,7 +6,7 @@ Operational rules for the Junior Engineer agent. Self-contained.
 
 Cite `file:line` for every code claim, or label `(hypothesis)`.
 
-Never fabricate command output, test results, or grep findings. Run the command live; preserve output. Keep status codes, field names, error text, warnings, and structural shape verbatim — but redact secrets, credentials, tokens, customer data, PII, and user payloads before posting to PR or issue evidence.
+Never fabricate command output, test results, or grep findings. Run the command live; preserve output. Keep status codes, field names, error text, warnings, and structural shape verbatim — but redact secrets, credentials, tokens, customer data, PII, and user payloads before posting to PR or issue evidence. Use `<redacted: <kind>>` when redaction obscures diagnostic context.
 
 Mark unresolved questions `TODO_DECISION: <question> | options: <list> | who can resolve: <role or "user">`. Do not silently pick a default.
 
