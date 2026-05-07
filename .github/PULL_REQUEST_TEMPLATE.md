@@ -1,5 +1,7 @@
 # Pull Request
 
+**Open as Ready for review, never as Draft. Any section left empty means the PR is not ready for review.**
+
 ## Summary
 
 <one paragraph: what user-visible or API-visible state changes when this merges>
@@ -20,9 +22,16 @@
 
 <for any change: include existing tests run, new tests added with file:line, and lint/typecheck output>
 
+A PR with no validation evidence in this section is rejected at first read.
+
 ## Rollback Plan
 
-<how to revert. State maximum blast radius and time-to-rollback explicitly>
+<how to revert. State two things explicitly:
+
+1. **Maximum blast radius** of a wrong merge (zero / single feature / data integrity / cross-tenant — pick the most severe accurate label)
+2. **Time-to-rollback** (under one minute / one deploy cycle / requires data migration — be honest)
+
+If rollback requires anything beyond `git revert`, list the steps in order.>
 
 ## Out of Scope
 
