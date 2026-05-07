@@ -1,0 +1,8 @@
+# Repos under stone16/* that the PR-sweep should NOT enumerate.
+# One repo name per line (just the repo, no owner). Lines starting with # are comments.
+# Empty file = sweep all non-archived stone16/* repos.
+#
+# Add a repo here when:
+#   - it's a personal experiment / sandbox where automated review is noise
+#   - it's a third-party fork you don't actively maintain
+#   - it's owned by another sub-team with their own review chain
