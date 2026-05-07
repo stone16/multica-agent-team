@@ -19,12 +19,30 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local file="$1"
+  local unexpected="$2"
+  if grep -Fq -- "$unexpected" "$file"; then
+    printf 'Did not expect to find:\n%s\n\nin %s:\n' "$unexpected" "$file" >&2
+    sed -n '1,220p' "$file" >&2
+    fail "found unexpected content"
+  fi
+}
+
 assert_file_count() {
   local dir="$1"
   local expected="$2"
   local actual
   actual=$(find "$dir" -type f -name 'issue-*.description.md' | wc -l | tr -d ' ')
   [[ "$actual" == "$expected" ]] || fail "expected $expected issue descriptions, got $actual"
+}
+
+assert_comment_count() {
+  local dir="$1"
+  local expected="$2"
+  local actual
+  actual=$(find "$dir" -type f -name 'issue-comment-*.md' | wc -l | tr -d ' ')
+  [[ "$actual" == "$expected" ]] || fail "expected $expected issue comments, got $actual"
 }
 
 assert_status() {
@@ -70,6 +88,60 @@ if [[ "$1 $2" == "pr diff" ]]; then
 fi
 
 if [[ "$1 $2" == "pr view" ]]; then
+  if printf '%s\n' "$*" | grep -Fq -- "--json body"; then
+    if [[ "$scenario" == "reviewed-with-action-items-missing-origin" || "$scenario" == "reviewed-with-action-items-missing-origin-warning-exists" ]]; then
+      printf 'No Multica origin yet.\n'
+    else
+      printf 'Originating Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\n'
+    fi
+    exit 0
+  fi
+
+  if printf '%s\n' "$*" | grep -Fq -- "hao-reviewed: deadbeef"; then
+    if [[ "$scenario" == "reviewed-debate" ]]; then
+      cat <<'COMMENTS'
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+    else
+      cat <<'COMMENTS'
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+    fi
+    exit 0
+  fi
+
+  if printf '%s\n' "$*" | grep -Fq -- "dustin-reviewed: deadbeef"; then
+    if [[ "$scenario" == "reviewed-debate" ]]; then
+      cat <<'COMMENTS'
+Verdict: approve
+
+Security findings: none.
+Performance findings: none.
+
+<!-- dustin-reviewed: deadbeef verdict: approve -->
+COMMENTS
+    else
+      cat <<'COMMENTS'
+Verdict: request-changes
+
+Security findings: none.
+Performance findings:
+- [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
+
+<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+    fi
+    exit 0
+  fi
+
   if [[ "$scenario" == "reviewed-with-action-items" || "$scenario" == "reviewed-with-action-items-comment-fails" ]]; then
     cat <<'COMMENTS'
 Verdict: request-changes
@@ -84,6 +156,51 @@ Performance findings:
 - [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
 
 <!-- dustin-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-debate" ]]; then
+    cat <<'COMMENTS'
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+Verdict: approve
+
+Security findings: none.
+Performance findings: none.
+
+<!-- dustin-reviewed: deadbeef verdict: approve -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-with-action-items-missing-origin" ]]; then
+    cat <<'COMMENTS'
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+Verdict: request-changes
+
+Security findings: none.
+Performance findings:
+- [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
+
+<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-with-action-items-missing-origin-warning-exists" ]]; then
+    cat <<'COMMENTS'
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+Verdict: request-changes
+
+Security findings: none.
+Performance findings:
+- [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
+
+<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+<!-- multica-origin-missing: deadbeef -->
 COMMENTS
   elif [[ "$scenario" == "reviewed-approve-approve" ]]; then
     cat <<'COMMENTS'
@@ -117,17 +234,42 @@ printf 'unexpected gh invocation: %s\n' "$*" >&2
 exit 64
 GH
 
-  cat >"$tmp/bin/multica" <<'MULTICA'
+cat >"$tmp/bin/multica" <<'MULTICA'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "$1 $2" == "issue comment" && "${3:-}" == "list" ]]; then
+  if [[ "${PR_SWEEP_EXISTING_ORIGIN_COMMENT:-0}" == "1" ]]; then
+    printf '[{"content":"<!-- multica-review-dispatched: deadbeef -->"}]\n'
+  else
+    printf '[]\n'
+  fi
+  exit 0
+fi
+
+if [[ "$1 $2" == "issue comment" && "${3:-}" == "add" ]]; then
+  if [[ "${PR_SWEEP_MULTICA_FAIL:-0}" == "1" ]]; then
+    printf 'simulated multica issue comment failure\n' >&2
+    exit 1
+  fi
+
+  idx_file="$PR_SWEEP_CAPTURE_DIR/issue-comment-count"
+  idx=0
+  if [[ -f "$idx_file" ]]; then
+    idx="$(cat "$idx_file")"
+  fi
+  idx=$((idx + 1))
+  printf '%s' "$idx" >"$idx_file"
+
+  printf '%s\n' "$*" >"$PR_SWEEP_CAPTURE_DIR/issue-comment-${idx}.args"
+  cat >"$PR_SWEEP_CAPTURE_DIR/issue-comment-${idx}.md"
+  printf '{"id":"issue-comment-%s"}\n' "$idx"
+  exit 0
+fi
+
 [[ "$1 $2" == "issue create" ]] || {
   if [[ "$1 $2" == "issue list" ]]; then
-    if [[ "${PR_SWEEP_EXISTING_DELEGATION:-0}" == "1" ]]; then
-      printf '[{"title":"PR review delegation needed — stone16/sample-repo#12@deadbeef"}]\n'
-    else
-      printf '[]\n'
-    fi
+    printf '[]\n'
     exit 0
   fi
   printf 'unexpected multica invocation: %s\n' "$*" >&2
@@ -159,7 +301,7 @@ MULTICA
     PR_SWEEP_CAPTURE_DIR="$tmp/captures" \
     PR_SWEEP_PR_COMMENT_FAIL="${PR_SWEEP_PR_COMMENT_FAIL:-0}" \
     PR_SWEEP_MULTICA_FAIL="${PR_SWEEP_MULTICA_FAIL:-0}" \
-    PR_SWEEP_EXISTING_DELEGATION="${PR_SWEEP_EXISTING_DELEGATION:-0}" \
+    PR_SWEEP_EXISTING_ORIGIN_COMMENT="${PR_SWEEP_EXISTING_ORIGIN_COMMENT:-0}" \
     LC_ALL=C \
     LANG=C \
     PATH="$tmp/bin:$PATH" \
@@ -194,17 +336,25 @@ test_dispatch_prompt_includes_clickable_pr_links() {
   assert_contains "$tmp/captures/issue-2.description.md" "[stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef"
 }
 
-test_cto_delegation_issue_created_for_actionable_consensus() {
+test_origin_issue_comment_created_for_actionable_consensus() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-action-items)"
 
-  assert_file_count "$tmp/captures" 1
-  assert_contains "$tmp/captures/issue-1.args" "--assignee Stometa"
-  assert_contains "$tmp/captures/issue-1.args" "PR review delegation needed — stone16/sample-repo#12@deadbeef"
-  assert_contains "$tmp/captures/issue-1.description.md" "CTO delegation needed for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12)."
-  assert_contains "$tmp/captures/issue-1.description.md" "- PR: [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12)"
-  assert_contains "$tmp/captures/issue-1.description.md" "- Head commit: deadbeef"
-  assert_contains "$tmp/captures/issue-1.description.md" "- Reviewer verdicts: Hao=request-changes, Dustin=request-changes"
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-comment-1.args" "2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e"
+  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- PR: https://github.com/stone16/sample-repo/pull/12"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Head commit: deadbeef"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: consensus: request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Hao verdict: request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Dustin verdict: request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "missing regression test."
+  assert_contains "$tmp/captures/issue-comment-1.md" "outbound call has no timeout."
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "hao-reviewed:"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "dustin-reviewed:"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-dispatched: deadbeef -->"
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
 test_no_cto_delegation_for_approve_consensus() {
@@ -212,17 +362,56 @@ test_no_cto_delegation_for_approve_consensus() {
   tmp="$(run_sweep_with_stubs reviewed-approve-approve)"
 
   assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: approve -->"
 }
 
-test_existing_delegation_prevents_duplicate_when_final_comment_fails() {
+test_origin_issue_comment_created_for_debate() {
   local tmp
-  tmp="$(PR_SWEEP_PR_COMMENT_FAIL=1 run_sweep_with_stubs reviewed-with-action-items-comment-fails)"
+  tmp="$(run_sweep_with_stubs reviewed-debate)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: debate"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Hao verdict: request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Dustin verdict: approve"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "hao-reviewed:"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "dustin-reviewed:"
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- debate: deadbeef -->"
+}
+
+test_missing_origin_posts_one_pr_warning_and_skips_multica_comment() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items-missing-origin)"
 
   assert_status "$tmp" 0
-  assert_file_count "$tmp/captures" 1
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
+  assert_contains "$tmp/captures/pr-comment.md" "Originating Multica issue link is missing."
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- multica-origin-missing: deadbeef -->"
+}
+
+test_existing_missing_origin_warning_is_not_duplicated() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items-missing-origin-warning-exists)"
+
+  assert_status "$tmp" 0
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
+  [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "missing-origin warning was duplicated"
+  assert_contains "$tmp/stderr.log" "origin-link=missing-warning-exists stone16/sample-repo#12@deadbeef"
+}
+
+test_existing_origin_comment_prevents_duplicate_when_final_comment_fails() {
+  local tmp
+  tmp="$(PR_SWEEP_EXISTING_ORIGIN_COMMENT=1 PR_SWEEP_PR_COMMENT_FAIL=1 run_sweep_with_stubs reviewed-with-action-items-comment-fails)"
+
+  assert_status "$tmp" 0
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
   [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "final PR sentinel unexpectedly succeeded"
   assert_contains "$tmp/stderr.log" "[warn] post_pr_comment failed for stone16/sample-repo#12"
+  assert_contains "$tmp/stderr.log" "origin-comment=exists 2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e stone16/sample-repo#12@deadbeef"
 }
 
 test_multica_dispatch_failure_does_not_abort_sweep() {
@@ -231,35 +420,41 @@ test_multica_dispatch_failure_does_not_abort_sweep() {
 
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
   assert_contains "$tmp/stderr.log" "[warn] dispatch_agent failed for Hao"
   assert_contains "$tmp/stderr.log" "[warn] dispatch_agent failed for Dustin"
 }
 
-test_cto_delegation_failure_does_not_abort_sweep() {
+test_origin_comment_failure_does_not_abort_sweep() {
   local tmp
   tmp="$(PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs reviewed-with-action-items)"
 
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
   [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "final PR sentinel was written even though CTO delegation failed"
-  assert_contains "$tmp/stderr.log" "[warn] dispatch_cto_delegation failed for stone16/sample-repo#12"
+  assert_contains "$tmp/stderr.log" "[warn] post_origin_issue_comment failed for stone16/sample-repo#12"
 }
 
-test_existing_cto_delegation_allows_final_comment_without_duplicate() {
+test_existing_origin_comment_allows_final_comment_without_duplicate() {
   local tmp
-  tmp="$(PR_SWEEP_EXISTING_DELEGATION=1 PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs reviewed-with-action-items)"
+  tmp="$(PR_SWEEP_EXISTING_ORIGIN_COMMENT=1 PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs reviewed-with-action-items)"
 
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
-  assert_contains "$tmp/stderr.log" "cto-delegation=exists stone16/sample-repo#12@deadbeef"
+  assert_contains "$tmp/stderr.log" "origin-comment=exists 2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e stone16/sample-repo#12@deadbeef"
 }
 
 test_dispatch_prompt_includes_clickable_pr_links
-test_cto_delegation_issue_created_for_actionable_consensus
+test_origin_issue_comment_created_for_actionable_consensus
 test_no_cto_delegation_for_approve_consensus
-test_existing_delegation_prevents_duplicate_when_final_comment_fails
+test_origin_issue_comment_created_for_debate
+test_missing_origin_posts_one_pr_warning_and_skips_multica_comment
+test_existing_missing_origin_warning_is_not_duplicated
+test_existing_origin_comment_prevents_duplicate_when_final_comment_fails
 test_multica_dispatch_failure_does_not_abort_sweep
-test_cto_delegation_failure_does_not_abort_sweep
-test_existing_cto_delegation_allows_final_comment_without_duplicate
-printf 'PASS: pr-sweep prompt/delegation tests\n'
+test_origin_comment_failure_does_not_abort_sweep
+test_existing_origin_comment_allows_final_comment_without_duplicate
+printf 'PASS: pr-sweep prompt/origin-comment tests\n'

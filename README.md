@@ -82,7 +82,7 @@ The team's automated code-review chain runs as a GitHub Action in this repo:
 | File | Role |
 |---|---|
 | `.github/workflows/pr-sweep.yml` | Cron schedule (`*/15 * * * *`) + invokes the script |
-| `.github/scripts/pr-sweep.sh` | Deterministic filter — enumerates open PRs across all non-archived `stone16/*` repos, decides which need review, dispatches batched Multica issues to Hao and Dustin, and opens CTO delegation issues after actionable review outcomes |
+| `.github/scripts/pr-sweep.sh` | Deterministic filter — enumerates open PRs across all non-archived `stone16/*` repos, decides which need review, dispatches batched Multica issues to Hao and Dustin, and posts actionable review outcomes back to the originating Multica issue |
 | `.pr-sweep-ignore` | Optional newline-separated list of repo names to exclude from the sweep |
 
 ### Why this shape
@@ -99,7 +99,7 @@ To enable the workflow, set these secrets on this repository (`stone16/agent-tea
 
 | Secret | What it is | Scope |
 |---|---|---|
-| `MULTICA_TOKEN` | Personal access token from your Multica account | Used by `multica login --token` so the script can `multica issue create` to dispatch reviews |
+| `MULTICA_TOKEN` | Personal access token for the Hao/Eng Multica agent identity | Used by `multica login --token` so the script can create review-dispatch issues and comment on originating issues |
 | `GH_PAT` | GitHub Personal Access Token | `repo` scope (read access to all `stone16/*` repos, including private). The default `GITHUB_TOKEN` only sees this one repo, so a PAT is required to enumerate cross-repo PRs |
 
 Both are required. The workflow's first step fails loud if either is missing.
@@ -122,7 +122,15 @@ When both reviewers have written sentinels for the same SHA, the script writes o
 
 The next sweep skips PRs that already have a final sentinel for the current SHA. New commits invalidate the sentinel automatically (different SHA).
 
-If the reconciled outcome has action items (`request-changes`, `block`, or reviewer disagreement), the script creates one CTO-assigned Multica issue. That issue includes a clickable PR link, visible PR number, head commit, and both reviewer verdicts. This replaces free-text agent mentions: the simpler alternative was asking reviewers to remember to @ CTO, but that is easy to miss and conflicts with the no agent-to-agent mention rule.
+If the reconciled outcome has action items (`request-changes`, `block`, or reviewer disagreement), the script parses the first `mention://issue/<uuid>` link from the PR body and posts one Multica comment on that originating issue with the PR URL, head commit, final verdict, both reviewer verdicts, and the matching review bodies with review sentinels stripped. The comment includes the CTO mention so routing happens inside the existing issue thread.
+
+Every PR body must include this near the top:
+
+```
+Originating Multica issue: [STO-42](mention://issue/<uuid>)
+```
+
+If the origin link is missing, the script posts one idempotent PR warning with `<!-- multica-origin-missing: <sha> -->`, skips the Multica comment, and retries on the next sweep after the PR body is fixed. It does not create a fallback issue.
 
 Reviewer behavior is in `agents/senior-engineer/skill.md` (Hao) and `agents/security-perf-reviewer/skill.md` (Dustin). Do not edit the sentinel format in only one place — change both, and re-sync to Multica via `multica skill update`.
 

@@ -2,6 +2,8 @@
 
 **Open as Ready for review, never as Draft. Any section left empty means the PR is not ready for review.**
 
+Originating Multica issue: [STO-42](mention://issue/<uuid>)
+
 ## Summary
 
 <one paragraph: what user-visible or API-visible state changes when this merges>
