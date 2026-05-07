@@ -46,9 +46,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install multica CLI
+        env:
+          MULTICA_VERSION: '0.2.26'
         run: |
-          curl -fsSL https://multica.dev/install.sh | sh
-          echo "$HOME/.multica/bin" >> "$GITHUB_PATH"
+          set -e
+          curl -fsSL "https://github.com/multica-ai/multica/releases/download/v${MULTICA_VERSION}/multica-cli-${MULTICA_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz multica
+          sudo mv multica /usr/local/bin/multica
+          multica --version
 
       - name: Authenticate multica
         run: multica login --token "$MULTICA_TOKEN"
