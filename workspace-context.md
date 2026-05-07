@@ -50,6 +50,8 @@ Do not invent ad-hoc structures.
 
 Code-shipping agents (CTO, Tech Lead, Senior Engineer, Junior Engineer) do not consider a change shipped when it is committed. The unit of delivery is a Pull Request.
 
+Agent-created PRs MUST be opened as GitHub **Ready for review**, never as Draft PRs. If the template body is not filled, do not open the PR yet. If a tool creates a Draft PR anyway, immediately run `gh pr ready` before posting the PR for review.
+
 Every PR description MUST follow `templates/pr-description.md` verbatim and contain these sections, each filled:
 
 | Section | Content |
@@ -94,3 +96,4 @@ The user uses these to dispatch implementation work. Details: `skills/issue-rout
 - Do not output `Co-Authored-By` lines or marketing language in any artifact.
 - Do not consider a code change shipped when it is committed. The unit of delivery is a Pull Request with every required section in `templates/pr-description.md` filled.
 - Do not request review on a PR with any required section in `templates/pr-description.md` empty.
+- Do not create GitHub Draft PRs for agent work. Create a ready PR with the template filled, or wait until it is ready.

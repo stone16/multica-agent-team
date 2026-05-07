@@ -102,10 +102,11 @@ $ <exact command>
 The unit of delivery is a Pull Request, not a commit. After implementing the change and running the full Verification Matrix:
 
 1. Push your branch to origin.
-2. Open a PR (`gh pr create`).
+2. Open a ready-for-review PR (`gh pr create`, without `--draft`). If GitHub creates it as a Draft PR anyway, run `gh pr ready` before handing it off.
 3. Fill out the PR description using the template below — verbatim. Every section is required.
 
 A PR description with any required section empty is a draft, not a request for review. Do not ping Senior Engineer for review until every section is filled.
+Do not create GitHub Draft PRs. If the PR body is not ready, keep working locally instead of opening a placeholder PR.
 
 The `How I Tested` section is what the reviewer uses to judge correctness without re-running every test themselves. Skimping forces Senior to do your verification work — and they will Request Changes back to you for that.
 
