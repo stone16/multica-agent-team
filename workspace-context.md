@@ -42,8 +42,28 @@ For structured artifacts, use the template from `templates/` verbatim:
 | Test rubric | `templates/eval-rubric.md` |
 | Incident report | `templates/incident-report.md` |
 | User feedback summary | `templates/user-feedback-report.md` |
+| Pull Request description | `templates/pr-description.md` |
 
 Do not invent ad-hoc structures.
+
+## Pull Request Discipline
+
+Code-shipping agents (CTO, Tech Lead, Senior Engineer, Junior Engineer) do not consider a change shipped when it is committed. The unit of delivery is a Pull Request.
+
+Every PR description MUST follow `templates/pr-description.md` verbatim and contain these sections, each filled:
+
+| Section | Content |
+|---|---|
+| **Summary** | What user-visible or API-visible state changes when this merges |
+| **Why** | The user pain or constraint that justifies the change. Cite the issue (`closes #NNN` or Multica link) |
+| **Approach** | How it was implemented — modules touched, key design choices, alternatives rejected with the constraint that ruled them out |
+| **How I Tested** | Frontend: before / after screenshots + manual flows + browser matrix. Backend: end-to-end test cases (each citing test `file:line`) + verbatim validation output, redacted. Always: existing tests run + new tests added + lint/typecheck |
+| **Rollback Plan** | How to revert. State maximum blast radius and time-to-rollback explicitly |
+| **Out of Scope** | Bullet list of things this PR explicitly does NOT change |
+
+A PR with any required section empty is a draft, not a request for review. Do not request review until every section is filled.
+
+A PR description that does not contain validation evidence (screenshots for frontend, test output for backend) in `How I Tested` is rejected at first read by reviewers — Senior Engineer reviewing Junior, Tech Lead reviewing Senior.
 
 ## Routing & Tier Recommendation
 
@@ -72,3 +92,5 @@ The user uses these to dispatch implementation work. Details: `skills/issue-rout
 - Do not modify the team constitution or any agent prompt from inside an agent task.
 - Do not assume cross-issue context. Each (agent, issue) pair has isolated state in Multica.
 - Do not output `Co-Authored-By` lines or marketing language in any artifact.
+- Do not consider a code change shipped when it is committed. The unit of delivery is a Pull Request with every required section in `templates/pr-description.md` filled.
+- Do not request review on a PR with any required section in `templates/pr-description.md` empty.

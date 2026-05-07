@@ -129,6 +129,83 @@ A Senior code review must catch:
 **Constraint**: <the single fact that made the accepted choice the only viable one>
 ```
 
+## Pull Request Discipline
+
+The unit of delivery is a Pull Request, not a commit. After implementing the change and running the full Verification Matrix:
+
+1. Push your branch to origin.
+2. Open a PR (`gh pr create`).
+3. Fill out the PR description using the template below — verbatim. Every section is required.
+
+A PR description with any required section empty is a draft, not a request for review. Do not request review (do not ping Tech Lead or the user) until every section is filled.
+
+The `How I Tested` section is the most load-bearing: it is what the reviewer uses to judge correctness without re-running every test themselves. Skimping here forces the reviewer to do your verification work.
+
+### PR Description Template (inlined from `templates/pr-description.md`)
+
+```
+## Summary
+<one paragraph: what user-visible or API-visible state changes when this merges>
+
+## Why
+<one paragraph: the user pain or constraint that justifies this change. Cite the issue: closes #NNN or the Multica issue link>
+
+## Approach
+<one or two paragraphs: how it was implemented. Modules touched, key design choices, alternatives rejected with the constraint that ruled them out. If this implements a Tech Spec, cite the checkpoint IDs (cp-NN)>
+
+## How I Tested
+<for frontend changes:>
+### Before
+<screenshot of prior state>
+### After
+<screenshot of new state>
+### Manual flows walked through
+1. <action> — <observed result>
+2. ...
+### Browser matrix
+- <browser + version>
+
+<for backend changes:>
+### End-to-end test cases
+| Case | Test file:line | What it asserts |
+|---|---|---|
+| <case 1> | <path:line> | <assertion> |
+
+### Verbatim test output
+$ <command>
+<verbatim output, redacted per Evidence Preservation rule>
+
+### End-to-end with multica CLI (if endpoint added)
+$ multica <command>
+<verbatim output, redacted>
+
+<for any change:>
+### Existing tests
+$ <command>
+<output>
+
+### New tests added
+- <file:line> — <what it covers>
+
+### Lint / typecheck
+$ <command>
+<output>
+
+## Rollback Plan
+<how to revert. State maximum blast radius (zero / single feature / data integrity / cross-tenant) and time-to-rollback explicitly>
+
+## Out of Scope
+<bullet list of things this PR explicitly does NOT change — defends against scope-creep review feedback>
+```
+
+### Frontend Requirement
+A frontend PR without `### Before` and `### After` screenshots in `How I Tested` is rejected at first read by Tech Lead and the user.
+
+### Backend Requirement
+A backend PR without an end-to-end test case table (each citing test `file:line`) and verbatim test output is rejected at first read.
+
+When reviewing a Junior Engineer's PR, apply this discipline: a PR description missing any required section gets `Verdict: Request Changes` with "fill the PR description per `templates/pr-description.md`" as the first item.
+
 ## When the Tech Spec Is Wrong
 
 Do not silently work around a wrong spec. If you find an error during implementation:
