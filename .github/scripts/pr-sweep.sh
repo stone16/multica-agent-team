@@ -61,7 +61,12 @@ pr_changed_files() {
 
 post_pr_comment() {
   local body="$3"
-  printf '%s' "$body" | gh pr comment "$2" --repo "$GH_OWNER/$1" --body-file -
+  # Don't let a single comment-write failure (e.g., PAT lacks write scope on
+  # this repo, rate limit, vanished PR) abort the entire sweep. Log and move on.
+  if ! printf '%s' "$body" | gh pr comment "$2" --repo "$GH_OWNER/$1" --body-file - 2>&1; then
+    log "    [warn] post_pr_comment failed for $GH_OWNER/$1#$2 (continuing)"
+    return 0
+  fi
 }
 
 # ---------- Sentinel parsing ----------
