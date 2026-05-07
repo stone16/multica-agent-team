@@ -91,6 +91,8 @@ The cost driver in agent-driven workflows is **agent invocations**, not script r
 
 The review prompt follows the Claude Code review shape we want to emulate: review the current PR head, focus on production-impacting bugs instead of style nits, require evidence in each finding, and leave a machine-readable marker after a real review. We keep that as Markdown prompt and Bash, not a new review service.
 
+Hao and Dustin are not a rotation. For every non-docs production-code PR, the sweep queues both reviewers when neither has reviewed the current SHA. If one reviewer has already posted a current sentinel, the sweep queues only the missing reviewer. Hao carries the general Senior Engineer code-quality lane; Dustin carries the security, performance, dependency-risk, and adversarial-input lane. Their required evidence bar is identical: surrounding context, `file:line` findings, production-impacting issues first, explicit verification status, strict verdict word, and no sentinel without a real review.
+
 ### Required GitHub Actions secrets
 
 To enable the workflow, set these secrets on this repository (`stone16/agent-team`):

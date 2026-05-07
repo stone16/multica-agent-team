@@ -201,6 +201,17 @@ PRs to review (format: clickable \`owner/repo#num\` plus \`@\` head SHA — the 
 
 $pr_list
 
+Both reviewers are required on every non-docs production-code PR; this is not a rotation. Hao owns general code-quality review. Dustin owns security, performance, and adversarial-input review. The lenses differ, but the review depth does not.
+
+Minimum review bar is identical for both reviewers:
+
+- Read the PR diff, linked issue, and changed files in surrounding context before posting.
+- Cite \`file:line\` for every finding.
+- Prioritize production-impacting defects over style, naming, or speculative architecture.
+- Re-run the relevant verification when practical; otherwise state the exact verification gap.
+- Use exactly one of \`approve\`, \`request-changes\`, or \`block\`.
+- Do not write the sentinel unless you completed a real review of the current head SHA.
+
 Operational reminders:
 
 1. Read each PR's CURRENT \`headRefOid\` immediately before posting your sentinel:
