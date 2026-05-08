@@ -330,10 +330,15 @@ test_dispatch_prompt_includes_clickable_pr_links() {
 
   assert_file_count "$tmp/captures" 2
   assert_contains "$tmp/captures/issue-1.description.md" "[stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef"
-  assert_contains "$tmp/captures/issue-1.description.md" "Both reviewers are required on every non-docs production-code PR; this is not a rotation."
+  assert_contains "$tmp/captures/issue-1.description.md" "Both reviewers are required on every PR; this is not a rotation."
+  assert_contains "$tmp/captures/issue-1.description.md" "Documentation-only PRs receive the same dual review"
   assert_contains "$tmp/captures/issue-1.description.md" "Minimum review bar is identical for both reviewers:"
+  assert_contains "$tmp/captures/issue-1.description.md" "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
+  assert_contains "$tmp/captures/issue-1.description.md" "If \`multica repo checkout\` fails because the SHA is unreachable"
   assert_contains "$tmp/captures/issue-1.description.md" "Use the PR link above in your PR comment and in this Multica issue summary"
+  assert_not_contains "$tmp/captures/issue-1.description.md" "non-docs production-code"
   assert_contains "$tmp/captures/issue-2.description.md" "[stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef"
+  assert_contains "$tmp/captures/issue-2.description.md" "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
 }
 
 test_origin_issue_comment_created_for_actionable_consensus() {
