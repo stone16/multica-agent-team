@@ -87,11 +87,11 @@ The team's automated code-review chain runs as a GitHub Action in this repo:
 
 ### Why this shape
 
-The cost driver in agent-driven workflows is **agent invocations**, not script runs. By doing the deterministic filter (sentinel match, SHA compare, docs-only check) in the GH-Actions-hosted shell script, we only invoke Hao or Dustin when there is genuinely new code to review. Empty sweeps cost ~$0.
+The cost driver in agent-driven workflows is **agent invocations**, not script runs. By doing the deterministic filter (sentinel match, SHA compare) in the GH-Actions-hosted shell script, we only invoke Hao or Dustin when there is genuinely new code to review. Empty sweeps cost ~$0.
 
 The review prompt follows the Claude Code review shape we want to emulate: review the current PR head, focus on production-impacting bugs instead of style nits, require evidence in each finding, and leave a machine-readable marker after a real review. We keep that as Markdown prompt and Bash, not a new review service.
 
-Hao and Dustin are not a rotation. For every non-docs production-code PR, the sweep queues both reviewers when neither has reviewed the current SHA. If one reviewer has already posted a current sentinel, the sweep queues only the missing reviewer. Hao carries the general Senior Engineer code-quality lane; Dustin carries the security, performance, dependency-risk, and adversarial-input lane. Their required evidence bar is identical: surrounding context, `file:line` findings, production-impacting issues first, explicit verification status, strict verdict word, and no sentinel without a real review.
+Hao and Dustin are not a rotation. For every PR — including documentation-only PRs — the sweep queues both reviewers when neither has reviewed the current SHA. If one reviewer has already posted a current sentinel, the sweep queues only the missing reviewer. Hao carries the general Senior Engineer code-quality lane; Dustin carries the security, performance, dependency-risk, and adversarial-input lane. Their required evidence bar is identical: full repo context (each reviewer checks out the PR head SHA into an isolated Multica worktree before reading code), `file:line` findings, production-impacting issues first, explicit verification status, strict verdict word, and no sentinel without a real review.
 
 ### Required GitHub Actions secrets
 

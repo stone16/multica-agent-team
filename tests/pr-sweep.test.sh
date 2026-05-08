@@ -324,16 +324,52 @@ MULTICA
   printf '%s\n' "$tmp"
 }
 
+assert_line_before() {
+  local file="$1"
+  local earlier="$2"
+  local later="$3"
+  local earlier_n later_n
+  earlier_n=$(grep -nF -- "$earlier" "$file" | head -1 | cut -d: -f1)
+  later_n=$(grep -nF -- "$later" "$file" | head -1 | cut -d: -f1)
+  if [[ -z "$earlier_n" || -z "$later_n" ]]; then
+    fail "assert_line_before: missing anchor in $file (earlier=$earlier_n later=$later_n)"
+  fi
+  if (( earlier_n >= later_n )); then
+    printf 'Expected line %s ("%s")\nto appear BEFORE line %s ("%s")\nin %s:\n' \
+      "$earlier_n" "$earlier" "$later_n" "$later" "$file" >&2
+    sed -n '1,220p' "$file" >&2
+    fail "ordering violation"
+  fi
+}
+
 test_dispatch_prompt_includes_clickable_pr_links() {
   local tmp
   tmp="$(run_sweep_with_stubs unreviewed)"
 
   assert_file_count "$tmp/captures" 2
   assert_contains "$tmp/captures/issue-1.description.md" "[stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef"
-  assert_contains "$tmp/captures/issue-1.description.md" "Both reviewers are required on every non-docs production-code PR; this is not a rotation."
+  assert_contains "$tmp/captures/issue-1.description.md" "Both reviewers are required on every PR; this is not a rotation."
+  assert_contains "$tmp/captures/issue-1.description.md" "Documentation-only PRs receive the same dual review"
   assert_contains "$tmp/captures/issue-1.description.md" "Minimum review bar is identical for both reviewers:"
+  assert_contains "$tmp/captures/issue-1.description.md" "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
+  assert_contains "$tmp/captures/issue-1.description.md" "If \`multica repo checkout\` fails because the SHA is unreachable"
+  assert_contains "$tmp/captures/issue-1.description.md" "A sentinel must always reflect a review actually conducted on the SHA it tags"
   assert_contains "$tmp/captures/issue-1.description.md" "Use the PR link above in your PR comment and in this Multica issue summary"
+  assert_not_contains "$tmp/captures/issue-1.description.md" "non-docs production-code"
+
+  # Race-condition guard: the headRefOid pin must appear BEFORE the worktree
+  # checkout, otherwise an agent can review a stale SHA and post a sentinel
+  # tagged with a newer SHA it never actually reviewed.
+  assert_line_before "$tmp/captures/issue-1.description.md" \
+    "gh pr view <num> --repo <owner/repo> --json headRefOid --jq .headRefOid" \
+    "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
+
   assert_contains "$tmp/captures/issue-2.description.md" "[stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef"
+  assert_contains "$tmp/captures/issue-2.description.md" "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
+  assert_contains "$tmp/captures/issue-2.description.md" "A sentinel must always reflect a review actually conducted on the SHA it tags"
+  assert_line_before "$tmp/captures/issue-2.description.md" \
+    "gh pr view <num> --repo <owner/repo> --json headRefOid --jq .headRefOid" \
+    "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
 }
 
 test_origin_issue_comment_created_for_actionable_consensus() {
