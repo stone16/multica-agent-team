@@ -298,7 +298,7 @@ Both reviewers are required on every PR; this is not a rotation. Hao owns genera
 
 Minimum review bar is identical for both reviewers:
 
-- Check out the PR head SHA into an isolated Multica worktree before reading code (see step 1 below). Diff-only review is not sufficient; cross-file references, callers, and adjacent-file conventions only become visible against the full repo.
+- Check out the PR head SHA into an isolated Multica worktree before reading code (see step 2 below). Diff-only review is not sufficient; cross-file references, callers, and adjacent-file conventions only become visible against the full repo.
 - Read the PR diff, linked issue, and changed files in their surrounding repo context.
 - Cite \`file:line\` for every finding.
 - Prioritize production-impacting defects over style, naming, or speculative architecture.
@@ -308,34 +308,36 @@ Minimum review bar is identical for both reviewers:
 
 Operational reminders:
 
-1. Before reviewing each PR, check out the head commit into an isolated Multica worktree. Use this exact command (no \`git clone\`, no other refs):
-   \`\`\`
-   multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>
-   \`\`\`
-   The \`--ref\` MUST be the same SHA you will use in your sentinel. Read code from the worktree path printed by the command — that is the only place where surrounding context, callers, and adjacent files are reliably consistent with the diff.
-
-2. Read each PR's CURRENT \`headRefOid\` immediately before posting your sentinel:
+1. Read the PR's CURRENT \`headRefOid\` immediately before starting the review:
    \`\`\`
    gh pr view <num> --repo <owner/repo> --json headRefOid --jq .headRefOid
    \`\`\`
-   Use that SHA in your sentinel — commits may have landed since this batch was assembled. If the SHA changed between checkout and review, re-run \`multica repo checkout ... --ref <new-sha>\` against the new SHA before posting.
+   This SHA is the unit of review — the same value MUST be used for the worktree checkout, the code reading, and the sentinel. Treat it as immutable until the sentinel is posted. The \`@<sha>\` shown in the batch above may already be stale (commits can land between batch assembly and your review); always re-fetch here.
 
-3. If \`multica repo checkout\` fails because the SHA is unreachable (force-push, branch deleted, or the ref otherwise missing), DO NOT post a sentinel for that PR. Instead, post a plain note on this Multica issue summarizing which PR was unreachable and at which SHA; the next sweep will pick up the new head. Writing a sentinel for an SHA you could not actually review pollutes the consensus parser.
+2. Check out the PR head into an isolated Multica worktree against the SHA from step 1. Use this exact command (no \`git clone\`, no other refs):
+   \`\`\`
+   multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>
+   \`\`\`
+   Read code from the worktree path printed by the command — that is the only place where surrounding context, callers, and adjacent files are reliably consistent with the diff.
 
-4. One review comment per PR. End it with the sentinel exactly:
+3. Conduct the review against the worktree. Then, IMMEDIATELY BEFORE posting the sentinel, re-run the \`headRefOid\` check from step 1. If the SHA is unchanged, post your sentinel tagged with that SHA. If the SHA has changed, the review is stale: DO NOT post a sentinel for the old SHA, even with \`verdict: block\`. Discard the review and restart from step 1 against the new SHA — new checkout, new read, new findings — then post. A sentinel must always reflect a review actually conducted on the SHA it tags.
+
+4. If \`multica repo checkout\` fails because the SHA is unreachable (force-push, branch deleted, or the ref otherwise missing), DO NOT post a sentinel for that PR. Instead, post a plain note on this Multica issue summarizing which PR was unreachable and at which SHA; the next sweep will pick up the new head. Writing a sentinel for an SHA you could not actually review pollutes the consensus parser.
+
+5. One review comment per PR. End it with the sentinel exactly:
    \`\`\`
    <!-- ${sentinel_name}-reviewed: <head-sha> verdict: <approve|request-changes|block> -->
    \`\`\`
 
-5. Verdicts are exactly one of: \`approve\`, \`request-changes\`, \`block\`. The \`pr-sweep.sh\` parser is strict; other words are ignored.
+6. Verdicts are exactly one of: \`approve\`, \`request-changes\`, \`block\`. The \`pr-sweep.sh\` parser is strict; other words are ignored.
 
-6. Use the PR link above in your PR comment and in this Multica issue summary. The PR number must remain visible as \`owner/repo#num\`; the URL must be clickable for revisit/check-in.
+7. Use the PR link above in your PR comment and in this Multica issue summary. The PR number must remain visible as \`owner/repo#num\`; the URL must be clickable for revisit/check-in.
 
-7. When all PRs are reviewed, post a one-line summary comment on this Multica issue and set status to \`in_review\`. If a PR errors out (auth, rate limit, vanished), note it in the summary; the next sweep will retry.
+8. When all PRs are reviewed, post a one-line summary comment on this Multica issue and set status to \`in_review\`. If a PR errors out (auth, rate limit, vanished), note it in the summary; the next sweep will retry.
 
-8. If you produce action items (\`request-changes\` or \`block\`), do not @-mention another agent yourself. The sweep posts the reconciled outcome back to the originating Multica issue after both independent reviews are reconciled.
+9. If you produce action items (\`request-changes\` or \`block\`), do not @-mention another agent yourself. The sweep posts the reconciled outcome back to the originating Multica issue after both independent reviews are reconciled.
 
-9. Do not coordinate with the other reviewer in advance. Independent verdicts are the point — the script reconciles.
+10. Do not coordinate with the other reviewer in advance. Independent verdicts are the point — the script reconciles.
 EOF
 )
 
