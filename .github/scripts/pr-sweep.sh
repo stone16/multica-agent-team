@@ -23,6 +23,13 @@ DUSTIN_AGENT="${DUSTIN_AGENT:-Dustin}"
 CTO_AGENT="${CTO_AGENT:-Stometa}"
 CTO_MENTION="${CTO_MENTION:-[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)}"
 
+# Max number of request-changes / block consensus rounds before the loop
+# stops auto-routing back to the original author and escalates to CTO_MENTION.
+# Each round = one distinct head SHA that landed a non-approve consensus.
+# A 4th non-approve round on a 4th distinct SHA escalates instead of pinging
+# the author again. Debate consensus always escalates regardless of count.
+MAX_REVIEW_ITERATIONS="${MAX_REVIEW_ITERATIONS:-3}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 IGNORE_FILE="$REPO_ROOT/.pr-sweep-ignore"
@@ -117,6 +124,37 @@ origin_issue_id_from_body() {
     | head -1
 }
 
+# Extract the author agent UUID from the PR body's "Original author" line.
+# Returns empty if the line is missing — caller falls back to escalating to CTO.
+original_author_id_from_body() {
+  local body="$1"
+  printf '%s\n' "$body" \
+    | sed -nE 's/.*mention:\/\/agent\/([0-9a-fA-F-]{36}).*/\1/p' \
+    | head -1
+}
+
+# Render an `[@Agent](mention://agent/<uuid>)` link given the UUID.
+# We don't have the agent's display name from this side, so use a generic label;
+# Multica renders the link using the canonical name regardless.
+author_mention() {
+  local uuid="$1"
+  printf '[@author](mention://agent/%s)' "$uuid"
+}
+
+# Count distinct prior head SHAs that landed a non-approve consensus on this PR.
+# Used to decide whether to keep auto-iterating with the author or escalate.
+# Reads PR comments (stateless across sweep runs by design — sentinels persist
+# in the PR thread, so the counter survives without any external state store).
+iteration_count() {
+  local body="$1"
+  printf '%s' "$body" \
+    | grep -oE 'consensus:[[:space:]]*[a-f0-9]+[[:space:]]+verdict:[[:space:]]*(request-changes|block)' \
+    | awk '{print $2}' \
+    | sort -u \
+    | grep -c . \
+    || true
+}
+
 missing_origin_marker() {
   local sha="$1"
   printf '<!-- multica-origin-missing: %s -->' "$sha"
@@ -185,20 +223,49 @@ review_comment_body() {
 
 post_origin_issue_comment() {
   local issue_id="$1" repo="$2" num="$3" sha="$4" outcome="$5" hao="$6" dustin="$7"
-  local link marker hao_body dustin_body comment
+  local recipient="$8" action_kind="$9" iter="${10:-0}"
+  local link marker hao_body dustin_body comment header iter_line
   link="$(pr_url "$repo" "$num")"
   marker="$(origin_dispatch_marker "$sha")"
   hao_body="$(review_comment_body "$repo" "$num" "hao-reviewed" "$sha")"
   dustin_body="$(review_comment_body "$repo" "$num" "dustin-reviewed" "$sha")"
 
+  case "$action_kind" in
+    author-iteration)
+      header="$recipient PR review came back with \`request-changes\`. Please address the items below by pushing a new commit to the PR. The next sweep tick will pick up the new SHA and re-review automatically."
+      iter_line="- Iteration: $((iter + 1)) of $MAX_REVIEW_ITERATIONS (after this round, the next \`request-changes\` consensus will escalate to a human)"
+      ;;
+    max-iterations-escalation)
+      header="$CTO_MENTION PR review loop hit the iteration cap ($MAX_REVIEW_ITERATIONS rounds of \`request-changes\` / \`block\` consensus). Auto-routing has stopped — please decide whether to land, close, hand off to a different author, or override the cap."
+      iter_line="- Iteration count: $iter (cap: $MAX_REVIEW_ITERATIONS — reached)"
+      ;;
+    missing-author-escalation)
+      header="$CTO_MENTION PR review came back with \`request-changes\`, but the PR body has no \`Original author: [@AgentName](mention://agent/<uuid>)\` line, so the loop cannot route the feedback back to an agent. Please decide who handles this PR."
+      iter_line="- Iteration count: $iter (cap: $MAX_REVIEW_ITERATIONS)"
+      ;;
+    debate-escalation)
+      header="$CTO_MENTION Reviewers disagree on this PR — the consensus is split. Please cast the deciding vote (approve / request-changes / block) so the loop can converge."
+      iter_line=""
+      ;;
+    *)
+      log "    [warn] unknown action_kind=$action_kind, defaulting to CTO escalation"
+      header="$CTO_MENTION PR review needs routing."
+      iter_line=""
+      ;;
+  esac
+
+  local body_iter=""
+  [[ -n "$iter_line" ]] && body_iter=$'\n'"$iter_line"
+
   comment=$(cat <<EOF
-$CTO_MENTION PR review needs routing.
+$header
 
 - PR: $link
 - Head commit: $sha
 - Final verdict: $outcome
 - Hao verdict: $hao
-- Dustin verdict: $dustin
+- Dustin verdict: $dustin$body_iter
+- Action: $action_kind
 
 ## Hao Review
 
@@ -212,7 +279,7 @@ $marker
 EOF
 )
 
-  log "    origin-comment=post $issue_id $GH_OWNER/$repo#$num@$sha"
+  log "    origin-comment=post $issue_id $GH_OWNER/$repo#$num@$sha action=$action_kind iter=$iter"
   if ! printf '%s' "$comment" | multica issue comment add "$issue_id" --content-stdin >/dev/null; then
     log "    [warn] post_origin_issue_comment failed for $GH_OWNER/$repo#$num (continuing)"
     return 1
@@ -220,18 +287,47 @@ EOF
   return 0
 }
 
+# Decide how to route a finalized review back to the originating Multica issue.
+# Routing matrix (consensus_kind = "consensus-non-approve" | "debate"):
+#   debate                       → escalate to CTO_MENTION (humans break ties)
+#   non-approve, missing author  → escalate to CTO_MENTION (no agent to ping)
+#   non-approve, iter >= cap     → escalate to CTO_MENTION (cap reached)
+#   non-approve, iter <  cap     → ping original author for another iteration
 dispatch_origin_issue_comment() {
-  local repo="$1" num="$2" sha="$3" outcome="$4" hao="$5" dustin="$6"
-  local issue_id
-  issue_id="$(origin_issue_id_from_body "$(pr_body "$repo" "$num")")"
+  local repo="$1" num="$2" sha="$3" outcome="$4" hao="$5" dustin="$6" consensus_kind="$7"
+  local issue_id author_id pr_body_str pr_comments_str iter recipient action_kind
+  pr_body_str="$(pr_body "$repo" "$num")"
+  issue_id="$(origin_issue_id_from_body "$pr_body_str")"
 
   if [[ -z "$issue_id" ]]; then
     post_missing_origin_warning "$repo" "$num" "$sha"
     return 1
   fi
 
+  if [[ "$consensus_kind" == "debate" ]]; then
+    recipient="$CTO_MENTION"
+    action_kind="debate-escalation"
+    iter=0
+  else
+    pr_comments_str="$(pr_comments_body "$repo" "$num")"
+    iter="$(iteration_count "$pr_comments_str")"
+    : "${iter:=0}"
+    author_id="$(original_author_id_from_body "$pr_body_str")"
+
+    if [[ -z "$author_id" ]]; then
+      recipient="$CTO_MENTION"
+      action_kind="missing-author-escalation"
+    elif (( iter >= MAX_REVIEW_ITERATIONS )); then
+      recipient="$CTO_MENTION"
+      action_kind="max-iterations-escalation"
+    else
+      recipient="$(author_mention "$author_id")"
+      action_kind="author-iteration"
+    fi
+  fi
+
   origin_issue_comment_exists "$issue_id" "$repo" "$num" "$sha" \
-    || post_origin_issue_comment "$issue_id" "$repo" "$num" "$sha" "$outcome" "$hao" "$dustin"
+    || post_origin_issue_comment "$issue_id" "$repo" "$num" "$sha" "$outcome" "$hao" "$dustin" "$recipient" "$action_kind" "$iter"
 }
 
 # ---------- Consensus ----------
@@ -240,7 +336,7 @@ write_consensus() {
   local repo="$1" num="$2" sha="$3" hao="$4" dustin="$5"
 
   if [[ "$hao" == "$dustin" ]]; then
-    if [[ "$hao" != "approve" ]] && ! dispatch_origin_issue_comment "$repo" "$num" "$sha" "consensus: $hao" "$hao" "$dustin"; then
+    if [[ "$hao" != "approve" ]] && ! dispatch_origin_issue_comment "$repo" "$num" "$sha" "consensus: $hao" "$hao" "$dustin" "consensus-non-approve"; then
       log "    [warn] origin issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
       return 0
     fi
@@ -253,7 +349,7 @@ write_consensus() {
       log "    [warn] consensus comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
     fi
   else
-    if ! dispatch_origin_issue_comment "$repo" "$num" "$sha" "debate" "$hao" "$dustin"; then
+    if ! dispatch_origin_issue_comment "$repo" "$num" "$sha" "debate" "$hao" "$dustin" "debate"; then
       log "    [warn] origin issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
       return 0
     fi

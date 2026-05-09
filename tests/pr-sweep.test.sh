@@ -91,8 +91,10 @@ if [[ "$1 $2" == "pr view" ]]; then
   if printf '%s\n' "$*" | grep -Fq -- "--json body"; then
     if [[ "$scenario" == "reviewed-with-action-items-missing-origin" || "$scenario" == "reviewed-with-action-items-missing-origin-warning-exists" ]]; then
       printf 'No Multica origin yet.\n'
-    else
+    elif [[ "$scenario" == "reviewed-with-action-items-no-author" ]]; then
       printf 'Originating Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\n'
+    else
+      printf 'Originating Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\nOriginal author: [@Yiko](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n'
     fi
     exit 0
   fi
@@ -216,6 +218,45 @@ Security findings: none.
 Performance findings: none.
 
 <!-- dustin-reviewed: deadbeef verdict: approve -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-with-action-items-iter-cap" ]]; then
+    cat <<'COMMENTS'
+Consensus reached: request-changes.
+
+<!-- consensus: 1111111111111111111111111111111111111111 verdict: request-changes -->
+Consensus reached: request-changes.
+
+<!-- consensus: 2222222222222222222222222222222222222222 verdict: request-changes -->
+Consensus reached: request-changes.
+
+<!-- consensus: 3333333333333333333333333333333333333333 verdict: request-changes -->
+Verdict: request-changes
+
+- src/app.ts:7 -- still missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+Verdict: request-changes
+
+Security findings: none.
+Performance findings:
+- [missing-timeout] src/app.ts:12 -- outbound call still has no timeout.
+
+<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-with-action-items-no-author" ]]; then
+    cat <<'COMMENTS'
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+Verdict: request-changes
+
+Security findings: none.
+Performance findings:
+- [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
+
+<!-- dustin-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
   fi
   exit 0
@@ -372,24 +413,67 @@ test_dispatch_prompt_includes_clickable_pr_links() {
     "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
 }
 
-test_origin_issue_comment_created_for_actionable_consensus() {
+test_origin_issue_comment_routes_to_author_when_iter_under_cap() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-action-items)"
 
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 1
   assert_contains "$tmp/captures/issue-comment-1.args" "2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e"
-  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
+  # New behavior: non-approve consensus + author marker present + iter < cap
+  # routes to the original author for another iteration, not to CTO_MENTION.
+  assert_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
   assert_contains "$tmp/captures/issue-comment-1.md" "- PR: https://github.com/stone16/sample-repo/pull/12"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Head commit: deadbeef"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: consensus: request-changes"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Hao verdict: request-changes"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Dustin verdict: request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration: 1 of 3"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
   assert_contains "$tmp/captures/issue-comment-1.md" "missing regression test."
   assert_contains "$tmp/captures/issue-comment-1.md" "outbound call has no timeout."
   assert_not_contains "$tmp/captures/issue-comment-1.md" "hao-reviewed:"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "dustin-reviewed:"
   assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-dispatched: deadbeef -->"
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
+}
+
+test_origin_issue_comment_escalates_when_iter_cap_reached() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items-iter-cap)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
+  # 3 prior request-changes consensus sentinels for distinct SHAs → iteration_count=3
+  # which equals MAX_REVIEW_ITERATIONS, so route escalates to CTO_MENTION instead
+  # of pinging the author for a 4th round.
+  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: max-iterations-escalation"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration count: 3 (cap: 3 — reached)"
+  assert_contains "$tmp/captures/issue-comment-1.md" "iteration cap"
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
+}
+
+test_origin_issue_comment_escalates_when_author_marker_missing() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items-no-author)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
+  # Body has the issue marker but no Original author line → fall back to CTO
+  # escalation rather than blocking on the missing-origin warning (which only
+  # fires when the issue marker itself is absent).
+  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: missing-author-escalation"
+  assert_contains "$tmp/captures/issue-comment-1.md" "no \`Original author:"
+  # Should NOT trigger the PR-side missing-origin warning, since the issue
+  # marker IS present.
+  if [[ -f "$tmp/captures/pr-comment.md" ]]; then
+    assert_not_contains "$tmp/captures/pr-comment.md" "Originating Multica issue link is missing."
+  fi
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
@@ -408,6 +492,11 @@ test_origin_issue_comment_created_for_debate() {
 
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 1
+  # Debate ALWAYS escalates to CTO_MENTION regardless of iteration count or
+  # author marker — humans break ties; the loop does not retry on disagreement.
+  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: debate-escalation"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: debate"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Hao verdict: request-changes"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Dustin verdict: approve"
@@ -484,7 +573,9 @@ test_existing_origin_comment_allows_final_comment_without_duplicate() {
 }
 
 test_dispatch_prompt_includes_clickable_pr_links
-test_origin_issue_comment_created_for_actionable_consensus
+test_origin_issue_comment_routes_to_author_when_iter_under_cap
+test_origin_issue_comment_escalates_when_iter_cap_reached
+test_origin_issue_comment_escalates_when_author_marker_missing
 test_no_cto_delegation_for_approve_consensus
 test_origin_issue_comment_created_for_debate
 test_missing_origin_posts_one_pr_warning_and_skips_multica_comment
