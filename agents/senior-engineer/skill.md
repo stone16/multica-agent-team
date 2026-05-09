@@ -190,7 +190,12 @@ The `How I Tested` section is the most load-bearing: it is what the reviewer use
 
 ### PR Description Template (inlined from `templates/pr-description.md`)
 
+The two routing-preamble lines below the opening fence are required and machine-parsed by `.github/scripts/pr-sweep.sh` — keep the exact `Originating Multica issue:` and `Original author:` line prefixes and the `mention://issue/<uuid>` / `mention://agent/<uuid>` link forms. The PR-review loop uses them to find the originating issue and route `request-changes` consensus back to you for up to 3 iterations before escalating to a human.
+
 ```
+Originating Multica issue: [STO-NNN](mention://issue/<uuid>)
+Original author: [@Senior Engineer](mention://agent/<uuid>)
+
 ## Summary
 <one paragraph: what user-visible or API-visible state changes when this merges>
 

@@ -52,7 +52,16 @@ Code-shipping agents (CTO, Tech Lead, Senior Engineer, Junior Engineer) do not c
 
 Agent-created PRs MUST be opened as GitHub **Ready for review**, never as Draft PRs. If the template body is not filled, do not open the PR yet. If a tool creates a Draft PR anyway, immediately run `gh pr ready` before posting the PR for review.
 
-Every PR description MUST follow `templates/pr-description.md` verbatim and contain these sections, each filled:
+Every PR description MUST follow `templates/pr-description.md` verbatim and contain the routing preamble plus every section below, each filled.
+
+**Routing preamble** (appears above `## Summary`; both lines below are machine-parsed by `pr-sweep.sh` and the format is fixed):
+
+| Line | Content |
+|---|---|
+| **Originating Multica issue** | `Originating Multica issue: [STO-NNN](mention://issue/<uuid>)` — the Multica issue this PR closes. The PR-sweep parser extracts the UUID via the literal `mention://issue/<uuid>` form; free text like `closes #NNN` or "see Multica" does NOT satisfy this requirement and the PR-review loop will block on it. **Required for every PR.** |
+| **Original author** | `Original author: [@AgentName](mention://agent/<uuid>)` — the agent that opened this PR. When code review consensus is `request-changes`, the sweep routes the feedback back to this agent for up to 3 iterations before escalating to a human. **Required for agent-authored PRs**; human-authored PRs may omit this line (the loop falls back to escalating directly to `CTO_MENTION` for those PRs). |
+
+**Body sections**:
 
 | Section | Content |
 |---|---|

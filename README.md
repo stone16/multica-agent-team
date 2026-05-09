@@ -122,15 +122,29 @@ When both reviewers have written sentinels for the same SHA, the script writes o
 
 The next sweep skips PRs that already have a final sentinel for the current SHA. New commits invalidate the sentinel automatically (different SHA).
 
-If the reconciled outcome has action items (`request-changes`, `block`, or reviewer disagreement), the script parses the first `mention://issue/<uuid>` link from the PR body and posts one Multica comment on that originating issue with the PR URL, head commit, final verdict, both reviewer verdicts, and the matching review bodies with review sentinels stripped. The comment includes the CTO mention so routing happens inside the existing issue thread.
+If the reconciled outcome has action items (`request-changes`, `block`, or reviewer disagreement), the script parses both `mention://issue/<uuid>` and `mention://agent/<uuid>` links from the PR body and posts one Multica comment on the originating issue with the PR URL, head commit, final verdict, both reviewer verdicts, the matching review bodies with review sentinels stripped, and an `Action:` line indicating one of:
 
-Every PR body must include this near the top:
+| `Action:` value | Recipient mention | When |
+|---|---|---|
+| `author-iteration` | `[@author](mention://agent/<author-uuid>)` | Non-approve consensus, author marker present, iteration count under cap. Pings the original author to push fixes; the next sweep tick re-reviews. |
+| `max-iterations-escalation` | `CTO_MENTION` | Non-approve consensus and `MAX_REVIEW_ITERATIONS` (default 3) prior request-changes consensuses on distinct SHAs. Auto-routing stops; human decides. |
+| `missing-author-escalation` | `CTO_MENTION` | Non-approve consensus but no `Original author:` line in PR body. Falls back to human (e.g., human-authored PRs). |
+| `debate-escalation` | `CTO_MENTION` | Reviewers disagree. Always escalates regardless of iteration count. |
+
+Iteration count is derived from prior `<!-- consensus: <sha> verdict: (request-changes\|block) -->` sentinels on the PR — distinct SHAs only. The sweep is stateless across runs; the counter persists in PR comments.
+
+Every PR body must include the routing preamble near the top:
 
 ```
 Originating Multica issue: [STO-42](mention://issue/<uuid>)
+Original author: [@AgentName](mention://agent/<uuid>)
 ```
 
-If the origin link is missing, the script posts one idempotent PR warning with `<!-- multica-origin-missing: <sha> -->`, skips the Multica comment, and retries on the next sweep after the PR body is fixed. It does not create a fallback issue.
+The first line is required for every PR. The second line is required for agent-authored PRs; human-authored PRs may omit it (the loop will fall back to `missing-author-escalation`).
+
+If the issue link is missing, the script posts one idempotent PR warning with `<!-- multica-origin-missing: <sha> -->`, skips the Multica comment, and retries on the next sweep after the PR body is fixed. It does not create a fallback issue.
+
+`MAX_REVIEW_ITERATIONS` is configurable via env var on the workflow (default `3`). To raise/lower the cap, set it in `.github/workflows/pr-sweep.yml` under `env:`.
 
 Reviewer behavior is in `agents/senior-engineer/skill.md` (Hao) and `agents/security-perf-reviewer/skill.md` (Dustin). Do not edit the sentinel format in only one place — change both, and re-sync to Multica via `multica skill update`.
 
