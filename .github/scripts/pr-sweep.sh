@@ -124,11 +124,16 @@ origin_issue_id_from_body() {
     | head -1
 }
 
-# Extract the author agent UUID from the PR body's "Original author" line.
-# Returns empty if the line is missing — caller falls back to escalating to CTO.
+# Extract the author agent UUID from the PR body's "Original author:" line.
+# Anchored to a line beginning with "Original author:" (optional leading
+# whitespace) so that an unrelated agent mention elsewhere in the body —
+# a thank-you, a CC list, a quoted escalation — does not get treated as
+# the author. Returns empty if the line is absent or carries no agent
+# mention; caller falls back to escalating to CTO_MENTION.
 original_author_id_from_body() {
   local body="$1"
   printf '%s\n' "$body" \
+    | grep -E '^[[:space:]]*Original author:' \
     | sed -nE 's/.*mention:\/\/agent\/([0-9a-fA-F-]{36}).*/\1/p' \
     | head -1
 }
@@ -145,11 +150,17 @@ author_mention() {
 # Used to decide whether to keep auto-iterating with the author or escalate.
 # Reads PR comments (stateless across sweep runs by design — sentinels persist
 # in the PR thread, so the counter survives without any external state store).
+#
+# The regex requires the literal HTML-comment delimiters `<!--` and `-->` so
+# that prose discussing prior verdicts (e.g. quoted sentinels in a postmortem
+# comment, or an excerpt of an earlier sweep notification) does not inflate
+# the counter and trigger a premature CTO escalation. Only actual sentinels
+# emitted by `write_consensus()` count.
 iteration_count() {
   local body="$1"
   printf '%s' "$body" \
-    | grep -oE 'consensus:[[:space:]]*[a-f0-9]+[[:space:]]+verdict:[[:space:]]*(request-changes|block)' \
-    | awk '{print $2}' \
+    | grep -oE '<!--[[:space:]]*consensus:[[:space:]]*[a-f0-9]+[[:space:]]+verdict:[[:space:]]*(request-changes|block)[[:space:]]*-->' \
+    | awk '{print $3}' \
     | sort -u \
     | grep -c . \
     || true

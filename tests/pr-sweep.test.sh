@@ -93,6 +93,11 @@ if [[ "$1 $2" == "pr view" ]]; then
       printf 'No Multica origin yet.\n'
     elif [[ "$scenario" == "reviewed-with-action-items-no-author" ]]; then
       printf 'Originating Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\n'
+    elif [[ "$scenario" == "reviewed-with-action-items-unrelated-author-mention" ]]; then
+      # Hao's regression: body has the issue marker AND an unrelated agent
+      # mention (e.g. a thank-you), but no "Original author:" line. The
+      # parser must not treat the unrelated mention as the author.
+      printf 'Originating Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\nThanks to [@Hao](mention://agent/f804cbdf-33d3-4a98-a6b5-2f7b796915b6) for early feedback.\n'
     else
       printf 'Originating Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\nOriginal author: [@Yiko](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n'
     fi
@@ -243,7 +248,7 @@ Performance findings:
 
 <!-- dustin-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
-  elif [[ "$scenario" == "reviewed-with-action-items-no-author" ]]; then
+  elif [[ "$scenario" == "reviewed-with-action-items-no-author" || "$scenario" == "reviewed-with-action-items-unrelated-author-mention" ]]; then
     cat <<'COMMENTS'
 Verdict: request-changes
 
@@ -255,6 +260,32 @@ Verdict: request-changes
 Security findings: none.
 Performance findings:
 - [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
+
+<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-with-prose-mention-not-counted" ]]; then
+    # 1 REAL sentinel + 2 prose look-alikes that must NOT be counted.
+    # If the regex matched prose, iter would be 3 and the test would fail
+    # by routing to max-iterations-escalation instead of author-iteration.
+    cat <<'COMMENTS'
+Earlier we noted the consensus: feedfeedfeedfeedfeedfeedfeedfeedfeedfeed verdict: request-changes call was wrong.
+
+A reviewer quoted: "the marker `consensus: cafebabecafebabecafebabecafebabecafebabe verdict: block` got mangled in transit"
+
+The actual prior sentinel:
+
+<!-- consensus: 1111111111111111111111111111111111111111 verdict: request-changes -->
+
+Now the new round:
+
+Verdict: request-changes
+
+- src/app.ts:7 -- still missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+Verdict: request-changes
+
+Security findings: none.
 
 <!-- dustin-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
@@ -477,6 +508,45 @@ test_origin_issue_comment_escalates_when_author_marker_missing() {
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
+# Regression for Hao's review on PR #13: an unrelated `mention://agent/...`
+# anywhere in the PR body must not be promoted to "author" by the parser.
+# Only a line beginning `Original author:` counts. Without that line, route
+# falls through to missing-author-escalation (CTO).
+test_origin_issue_comment_escalates_when_only_unrelated_agent_mention() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items-unrelated-author-mention)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
+  # Crucial: the unrelated Hao mention in the PR body must NOT become the
+  # routed-to author. If the parser fell back to first-mention, this assertion
+  # would fail (recipient would be "[@author](mention://agent/f804cbdf-...)").
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "f804cbdf-33d3-4a98-a6b5-2f7b796915b6"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: missing-author-escalation"
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
+}
+
+# Regression for Dustin's hardening: `iteration_count()` must only match
+# real `<!-- consensus: <sha> verdict: ... -->` HTML-comment sentinels. Prose
+# that quotes or discusses a sentinel-shaped string (without the actual
+# `<!--` / `-->` delimiters) must not count toward the iteration cap.
+test_iteration_count_ignores_prose_sentinels() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-with-prose-mention-not-counted)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
+  # Comments contain 1 real sentinel + 2 prose look-alikes. Counter must be 1
+  # (the current SHA's consensus is the 2nd round). If prose were counted,
+  # iter would be 3 and we'd see max-iterations-escalation instead.
+  assert_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration: 2 of 3"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "max-iterations-escalation"
+}
+
 test_no_cto_delegation_for_approve_consensus() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-approve-approve)"
@@ -576,6 +646,8 @@ test_dispatch_prompt_includes_clickable_pr_links
 test_origin_issue_comment_routes_to_author_when_iter_under_cap
 test_origin_issue_comment_escalates_when_iter_cap_reached
 test_origin_issue_comment_escalates_when_author_marker_missing
+test_origin_issue_comment_escalates_when_only_unrelated_agent_mention
+test_iteration_count_ignores_prose_sentinels
 test_no_cto_delegation_for_approve_consensus
 test_origin_issue_comment_created_for_debate
 test_missing_origin_posts_one_pr_warning_and_skips_multica_comment
