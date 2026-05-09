@@ -160,7 +160,7 @@ review_issue_description() {
 This is the single Multica thread for this PR review.
 
 PR: $(review_queue_item "$repo" "$num" "$sha")
-Idempotency key: $GH_OWNER/$repo#$num
+Idempotency key: $(pr_url "$repo" "$num")
 
 The sweep reuses this issue for every head SHA on this PR. New pushes append a new review request comment; older review comments are stale when their SHA differs. The issue is marked \`done\` when both reviewers approve. If either reviewer requests changes, blocks, or disagrees, the sweep keeps this issue open and routes follow-up to CTO here.
 
@@ -297,6 +297,13 @@ $header
 - Hao verdict: $hao
 - Dustin verdict: $dustin
 - Action: $action_kind
+
+## Discussion Protocol
+
+Reply to each reviewer finding in this issue with one of: \`will-fix\`, \`already-fixed\`, \`wont-fix\`, or \`needs-discussion\`.
+State whether the finding is correct, what will change, or why it should not change.
+Keep the thread unresolved until CTO and reviewer agree on the outcome.
+End with a summary comment before marking the thread resolved.
 
 ## Hao Review
 

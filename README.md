@@ -122,7 +122,7 @@ When both reviewers have written sentinels for the same SHA, the script writes o
 
 The next sweep skips PRs that already have a final sentinel for the current SHA. New commits invalidate the sentinel automatically (different SHA).
 
-Each PR gets exactly one Multica review issue. The mapping is stored on the PR thread as:
+Each PR gets exactly one Multica review issue. The PR URL is the logical idempotency key; the durable mapping is stored on that PR thread as:
 
 ```
 <!-- multica-pr-review-issue: <issue-id> -->
@@ -143,6 +143,8 @@ If the reconciled outcome has action items (`request-changes`, `block`, or revie
 |---|---|---|
 | `cto-followup` | `CTO_MENTION` | Hao and Dustin agree on `request-changes` or `block`. CTO owns the next step in the same issue. |
 | `cto-debate` | `CTO_MENTION` | Reviewers disagree. CTO casts the deciding vote in the same issue. |
+
+Follow-up is discussion-first, not blind stale-marking. CTO replies to each reviewer finding in the Multica issue with one of `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`, states whether the finding is correct, and keeps the thread unresolved until CTO and reviewer agree. Once there is consensus, CTO posts a final summary and marks the thread resolved manually.
 
 If both reviewers approve, the script writes the PR consensus sentinel and marks the review issue `done` without mentioning CTO. If the PR is closed or merged before approval, close the review issue manually; the sweep only enumerates open PRs.
 

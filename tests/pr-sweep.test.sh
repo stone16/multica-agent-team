@@ -560,6 +560,10 @@ test_action_items_route_to_cto_in_pr_review_issue() {
   assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-followup"
   assert_contains "$tmp/captures/issue-comment-1.md" "missing regression test."
   assert_contains "$tmp/captures/issue-comment-1.md" "outbound call has no timeout."
+  assert_contains "$tmp/captures/issue-comment-1.md" "## Discussion Protocol"
+  assert_contains "$tmp/captures/issue-comment-1.md" 'Reply to each reviewer finding in this issue with one of: `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`.'
+  assert_contains "$tmp/captures/issue-comment-1.md" "Keep the thread unresolved until CTO and reviewer agree on the outcome."
+  assert_contains "$tmp/captures/issue-comment-1.md" "End with a summary comment before marking the thread resolved."
   assert_not_contains "$tmp/captures/issue-comment-1.md" "hao-reviewed:"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "dustin-reviewed:"
   assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-dispatched: deadbeef -->"
