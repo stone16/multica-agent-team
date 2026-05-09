@@ -7,12 +7,9 @@ The unit of delivery is a Pull Request, not a commit. Code-shipping agents (CTO,
 A PR description with any required section empty is a draft, not a request for review.
 Open GitHub PRs as **Ready for review**, never as Draft PRs. If the body is not ready, do not open the PR yet. If GitHub creates the PR as draft anyway, run `gh pr ready` before handing it off.
 
-Originating Multica issue: [STO-42](mention://issue/<uuid>)
-Original author: [@AgentName](mention://agent/<uuid>)
+Related Multica issue: [STO-42](mention://issue/<uuid>)
 
-> Both routing-preamble lines above are machine-parsed by `.github/scripts/pr-sweep.sh`:
-> - The first line lets the PR-review loop find the Multica issue this PR closes. Required for every agent-authored PR. Free text like `closes #NNN` does not satisfy this requirement; the literal `mention://issue/<uuid>` form is mandatory.
-> - The second line lets the loop ping the original author when consensus is `request-changes`, so the agent can iterate on the PR (up to 3 rounds before escalating to a human). Required for agent-authored PRs; human-authored PRs may omit it (the loop will escalate directly to the workspace owner).
+> The related issue line is for human traceability only. `.github/scripts/pr-sweep.sh` no longer parses PR body routing preambles; the review loop creates/reuses one Multica issue per PR and routes actionable outcomes to CTO in that issue.
 
 ---
 

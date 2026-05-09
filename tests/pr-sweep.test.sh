@@ -45,6 +45,22 @@ assert_comment_count() {
   [[ "$actual" == "$expected" ]] || fail "expected $expected issue comments, got $actual"
 }
 
+assert_pr_comment_count() {
+  local dir="$1"
+  local expected="$2"
+  local actual
+  actual=$(find "$dir" -type f -name 'pr-comment-*.md' | wc -l | tr -d ' ')
+  [[ "$actual" == "$expected" ]] || fail "expected $expected PR comments, got $actual"
+}
+
+assert_update_count() {
+  local dir="$1"
+  local expected="$2"
+  local actual
+  actual=$(find "$dir" -type f -name 'issue-update-*.args' | wc -l | tr -d ' ')
+  [[ "$actual" == "$expected" ]] || fail "expected $expected issue updates, got $actual"
+}
+
 assert_status() {
   local dir="$1"
   local expected="$2"
@@ -89,17 +105,12 @@ fi
 
 if [[ "$1 $2" == "pr view" ]]; then
   if printf '%s\n' "$*" | grep -Fq -- "--json body"; then
-    if [[ "$scenario" == "reviewed-with-action-items-missing-origin" || "$scenario" == "reviewed-with-action-items-missing-origin-warning-exists" ]]; then
-      printf 'No Multica origin yet.\n'
-    elif [[ "$scenario" == "reviewed-with-action-items-no-author" ]]; then
-      printf 'Originating Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\n'
-    elif [[ "$scenario" == "reviewed-with-action-items-unrelated-author-mention" ]]; then
-      # Hao's regression: body has the issue marker AND an unrelated agent
-      # mention (e.g. a thank-you), but no "Original author:" line. The
-      # parser must not treat the unrelated mention as the author.
-      printf 'Originating Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\nThanks to [@Hao](mention://agent/f804cbdf-33d3-4a98-a6b5-2f7b796915b6) for early feedback.\n'
+    if [[ "$scenario" == "reviewed-with-action-items-unrelated-author-mention" ]]; then
+      printf 'Related Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\nThanks to [@Hao](mention://agent/f804cbdf-33d3-4a98-a6b5-2f7b796915b6) for early feedback.\n'
+    elif [[ "$scenario" == "reviewed-with-action-items-no-related-issue" ]]; then
+      printf 'No related Multica issue yet.\n'
     else
-      printf 'Originating Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\nOriginal author: [@Yiko](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n'
+      printf 'Related Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\n'
     fi
     exit 0
   fi
@@ -149,7 +160,52 @@ COMMENTS
     exit 0
   fi
 
-  if [[ "$scenario" == "reviewed-with-action-items" || "$scenario" == "reviewed-with-action-items-comment-fails" ]]; then
+  if [[ "$scenario" == "unreviewed-review-issue-exists" ]]; then
+    cat <<'COMMENTS'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-hao-only-review-issue-exists" ]]; then
+    cat <<'COMMENTS'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-with-action-items-review-issue-exists" ]]; then
+    cat <<'COMMENTS'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- hao-reviewed: deadbeef verdict: request-changes -->
+Verdict: request-changes
+
+Security findings: none.
+Performance findings:
+- [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
+
+<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-approve-approve-review-issue-exists" ]]; then
+    cat <<'COMMENTS'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+Verdict: approve
+
+What I checked:
+- src/app.ts:1 -- change is covered.
+
+<!-- hao-reviewed: deadbeef verdict: approve -->
+Verdict: approve
+
+Security findings: none.
+Performance findings: none.
+
+<!-- dustin-reviewed: deadbeef verdict: approve -->
+COMMENTS
+  elif [[ "$scenario" == "reviewed-with-action-items" || "$scenario" == "reviewed-with-action-items-comment-fails" ]]; then
     cat <<'COMMENTS'
 Verdict: request-changes
 
@@ -178,7 +234,7 @@ Performance findings: none.
 
 <!-- dustin-reviewed: deadbeef verdict: approve -->
 COMMENTS
-  elif [[ "$scenario" == "reviewed-with-action-items-missing-origin" ]]; then
+  elif [[ "$scenario" == "reviewed-with-action-items-no-related-issue" ]]; then
     cat <<'COMMENTS'
 Verdict: request-changes
 
@@ -192,22 +248,6 @@ Performance findings:
 - [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
 
 <!-- dustin-reviewed: deadbeef verdict: request-changes -->
-COMMENTS
-  elif [[ "$scenario" == "reviewed-with-action-items-missing-origin-warning-exists" ]]; then
-    cat <<'COMMENTS'
-Verdict: request-changes
-
-- src/app.ts:7 -- missing regression test.
-
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
-Verdict: request-changes
-
-Security findings: none.
-Performance findings:
-- [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
-
-<!-- dustin-reviewed: deadbeef verdict: request-changes -->
-<!-- multica-origin-missing: deadbeef -->
 COMMENTS
   elif [[ "$scenario" == "reviewed-approve-approve" ]]; then
     cat <<'COMMENTS'
@@ -248,7 +288,7 @@ Performance findings:
 
 <!-- dustin-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
-  elif [[ "$scenario" == "reviewed-with-action-items-no-author" || "$scenario" == "reviewed-with-action-items-unrelated-author-mention" ]]; then
+  elif [[ "$scenario" == "reviewed-with-action-items-unrelated-author-mention" ]]; then
     cat <<'COMMENTS'
 Verdict: request-changes
 
@@ -264,9 +304,8 @@ Performance findings:
 <!-- dustin-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
   elif [[ "$scenario" == "reviewed-with-prose-mention-not-counted" ]]; then
-    # 1 REAL sentinel + 2 prose look-alikes that must NOT be counted.
-    # If the regex matched prose, iter would be 3 and the test would fail
-    # by routing to max-iterations-escalation instead of author-iteration.
+    # Old routing counted prior consensus sentinels and sometimes went back
+    # to the author. New routing ignores this for follow-up and pings CTO.
     cat <<'COMMENTS'
 Earlier we noted the consensus: feedfeedfeedfeedfeedfeedfeedfeedfeedfeed verdict: request-changes call was wrong.
 
@@ -298,7 +337,16 @@ if [[ "$1 $2" == "pr comment" ]]; then
     printf 'simulated pr comment failure\n' >&2
     exit 1
   fi
-  cat >"$PR_SWEEP_CAPTURE_DIR/pr-comment.md"
+  idx_file="$PR_SWEEP_CAPTURE_DIR/pr-comment-count"
+  idx=0
+  if [[ -f "$idx_file" ]]; then
+    idx="$(cat "$idx_file")"
+  fi
+  idx=$((idx + 1))
+  printf '%s' "$idx" >"$idx_file"
+
+  cat >"$PR_SWEEP_CAPTURE_DIR/pr-comment-${idx}.md"
+  cp "$PR_SWEEP_CAPTURE_DIR/pr-comment-${idx}.md" "$PR_SWEEP_CAPTURE_DIR/pr-comment.md"
   exit 0
 fi
 
@@ -311,7 +359,11 @@ cat >"$tmp/bin/multica" <<'MULTICA'
 set -euo pipefail
 
 if [[ "$1 $2" == "issue comment" && "${3:-}" == "list" ]]; then
-  if [[ "${PR_SWEEP_EXISTING_ORIGIN_COMMENT:-0}" == "1" ]]; then
+  if [[ "$PR_SWEEP_TEST_SCENARIO" == "unreviewed-review-issue-exists" ]]; then
+    printf '[{"content":"<!-- multica-review-requested: deadbeef agent: hao -->"}]\n'
+  elif [[ "$PR_SWEEP_TEST_SCENARIO" == "reviewed-with-action-items-review-issue-exists" && "${PR_SWEEP_EXISTING_ORIGIN_COMMENT:-0}" == "1" ]]; then
+    printf '[{"content":"<!-- multica-review-dispatched: deadbeef -->"}]\n'
+  elif [[ "${PR_SWEEP_EXISTING_ORIGIN_COMMENT:-0}" == "1" ]]; then
     printf '[{"content":"<!-- multica-review-dispatched: deadbeef -->"}]\n'
   else
     printf '[]\n'
@@ -339,6 +391,20 @@ if [[ "$1 $2" == "issue comment" && "${3:-}" == "add" ]]; then
   exit 0
 fi
 
+if [[ "$1 $2" == "issue update" ]]; then
+  idx_file="$PR_SWEEP_CAPTURE_DIR/issue-update-count"
+  idx=0
+  if [[ -f "$idx_file" ]]; then
+    idx="$(cat "$idx_file")"
+  fi
+  idx=$((idx + 1))
+  printf '%s' "$idx" >"$idx_file"
+
+  printf '%s\n' "$*" >"$PR_SWEEP_CAPTURE_DIR/issue-update-${idx}.args"
+  printf '{"id":"%s"}\n' "${3:-unknown}"
+  exit 0
+fi
+
 [[ "$1 $2" == "issue create" ]] || {
   if [[ "$1 $2" == "issue list" ]]; then
     printf '[]\n'
@@ -363,7 +429,7 @@ printf '%s' "$idx" >"$idx_file"
 
 printf '%s\n' "$*" >"$PR_SWEEP_CAPTURE_DIR/issue-${idx}.args"
 cat >"$PR_SWEEP_CAPTURE_DIR/issue-${idx}.description.md"
-printf '{"id":"issue-%s"}\n' "$idx"
+printf '{"id":"11111111-1111-1111-1111-00000000000%s"}\n' "$idx"
 MULTICA
 
   chmod +x "$tmp/bin/gh" "$tmp/bin/multica"
@@ -414,12 +480,20 @@ assert_line_before() {
   fi
 }
 
-test_dispatch_prompt_includes_clickable_pr_links() {
+test_unreviewed_pr_creates_one_review_issue_for_first_reviewer() {
   local tmp
   tmp="$(run_sweep_with_stubs unreviewed)"
 
-  assert_file_count "$tmp/captures" 2
+  assert_file_count "$tmp/captures" 1
+  assert_comment_count "$tmp/captures" 1
+  assert_update_count "$tmp/captures" 1
+  assert_pr_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-1.args" "--assignee Hao"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Hao"
+  assert_contains "$tmp/captures/issue-1.args" "--title PR review - stone16/sample-repo#12"
   assert_contains "$tmp/captures/issue-1.description.md" "[stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef"
+  assert_contains "$tmp/captures/issue-1.description.md" "This is the single Multica thread for this PR review."
+  assert_contains "$tmp/captures/issue-comment-1.md" "Hao review is requested for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef."
   assert_contains "$tmp/captures/issue-1.description.md" "Both reviewers are required on every PR; this is not a rotation."
   assert_contains "$tmp/captures/issue-1.description.md" "Documentation-only PRs receive the same dual review"
   assert_contains "$tmp/captures/issue-1.description.md" "Minimum review bar is identical for both reviewers:"
@@ -428,6 +502,8 @@ test_dispatch_prompt_includes_clickable_pr_links() {
   assert_contains "$tmp/captures/issue-1.description.md" "A sentinel must always reflect a review actually conducted on the SHA it tags"
   assert_contains "$tmp/captures/issue-1.description.md" "Use the PR link above in your PR comment and in this Multica issue summary"
   assert_not_contains "$tmp/captures/issue-1.description.md" "non-docs production-code"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: hao -->"
+  assert_contains "$tmp/captures/pr-comment-1.md" "<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->"
 
   # Race-condition guard: the headRefOid pin must appear BEFORE the worktree
   # checkout, otherwise an agent can review a stale SHA and post a sentinel
@@ -435,138 +511,131 @@ test_dispatch_prompt_includes_clickable_pr_links() {
   assert_line_before "$tmp/captures/issue-1.description.md" \
     "gh pr view <num> --repo <owner/repo> --json headRefOid --jq .headRefOid" \
     "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
-
-  assert_contains "$tmp/captures/issue-2.description.md" "[stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef"
-  assert_contains "$tmp/captures/issue-2.description.md" "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
-  assert_contains "$tmp/captures/issue-2.description.md" "A sentinel must always reflect a review actually conducted on the SHA it tags"
-  assert_line_before "$tmp/captures/issue-2.description.md" \
-    "gh pr view <num> --repo <owner/repo> --json headRefOid --jq .headRefOid" \
-    "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
 }
 
-test_origin_issue_comment_routes_to_author_when_iter_under_cap() {
+test_existing_review_issue_marker_prevents_duplicate_review_request() {
   local tmp
-  tmp="$(run_sweep_with_stubs reviewed-with-action-items)"
+  tmp="$(run_sweep_with_stubs unreviewed-review-issue-exists)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
+  assert_update_count "$tmp/captures" 1
+  assert_pr_comment_count "$tmp/captures" 0
+  assert_contains "$tmp/captures/issue-update-1.args" "11111111-1111-1111-1111-000000000001"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Hao"
+  assert_contains "$tmp/stderr.log" "review-request=exists 11111111-1111-1111-1111-000000000001 stone16/sample-repo#12@deadbeef"
+}
+
+test_after_hao_review_routes_dustin_in_same_review_issue() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-hao-only-review-issue-exists)"
 
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 1
-  assert_contains "$tmp/captures/issue-comment-1.args" "2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e"
-  # New behavior: non-approve consensus + author marker present + iter < cap
-  # routes to the original author for another iteration, not to CTO_MENTION.
-  assert_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
+  assert_update_count "$tmp/captures" 1
+  assert_pr_comment_count "$tmp/captures" 0
+  assert_contains "$tmp/captures/issue-update-1.args" "11111111-1111-1111-1111-000000000001"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Dustin"
+  assert_contains "$tmp/captures/issue-comment-1.md" "Dustin review is requested for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef."
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: dustin -->"
+}
+
+test_action_items_route_to_cto_in_pr_review_issue() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items)"
+
+  assert_file_count "$tmp/captures" 1
+  assert_comment_count "$tmp/captures" 1
+  assert_update_count "$tmp/captures" 1
+  assert_pr_comment_count "$tmp/captures" 2
+  assert_contains "$tmp/captures/issue-comment-1.args" "11111111-1111-1111-1111-000000000001"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Stometa"
+  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
   assert_contains "$tmp/captures/issue-comment-1.md" "- PR: https://github.com/stone16/sample-repo/pull/12"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Head commit: deadbeef"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: consensus: request-changes"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Hao verdict: request-changes"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Dustin verdict: request-changes"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration: 1 of 3"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-followup"
   assert_contains "$tmp/captures/issue-comment-1.md" "missing regression test."
   assert_contains "$tmp/captures/issue-comment-1.md" "outbound call has no timeout."
+  assert_contains "$tmp/captures/issue-comment-1.md" "## Discussion Protocol"
+  assert_contains "$tmp/captures/issue-comment-1.md" 'Reply to each reviewer finding in this issue with one of: `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`.'
+  assert_contains "$tmp/captures/issue-comment-1.md" "Keep the thread unresolved until CTO and reviewer agree on the outcome."
+  assert_contains "$tmp/captures/issue-comment-1.md" "End with a summary comment before marking the thread resolved."
   assert_not_contains "$tmp/captures/issue-comment-1.md" "hao-reviewed:"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "dustin-reviewed:"
   assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-dispatched: deadbeef -->"
+  assert_contains "$tmp/captures/pr-comment-1.md" "<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
-test_origin_issue_comment_escalates_when_iter_cap_reached() {
+test_missing_related_issue_still_routes_to_cto_review_issue() {
   local tmp
-  tmp="$(run_sweep_with_stubs reviewed-with-action-items-iter-cap)"
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items-no-related-issue)"
 
-  assert_file_count "$tmp/captures" 0
+  assert_file_count "$tmp/captures" 1
   assert_comment_count "$tmp/captures" 1
-  # 3 prior request-changes consensus sentinels for distinct SHAs → iteration_count=3
-  # which equals MAX_REVIEW_ITERATIONS, so route escalates to CTO_MENTION instead
-  # of pinging the author for a 4th round.
+  assert_update_count "$tmp/captures" 1
+  assert_pr_comment_count "$tmp/captures" 2
   assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: max-iterations-escalation"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration count: 3 (cap: 3 — reached)"
-  assert_contains "$tmp/captures/issue-comment-1.md" "iteration cap"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-followup"
+  assert_not_contains "$tmp/captures/pr-comment-1.md" "Originating Multica issue link is missing."
+  assert_contains "$tmp/captures/pr-comment-1.md" "<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
-test_origin_issue_comment_escalates_when_author_marker_missing() {
-  local tmp
-  tmp="$(run_sweep_with_stubs reviewed-with-action-items-no-author)"
-
-  assert_file_count "$tmp/captures" 0
-  assert_comment_count "$tmp/captures" 1
-  # Body has the issue marker but no Original author line → fall back to CTO
-  # escalation rather than blocking on the missing-origin warning (which only
-  # fires when the issue marker itself is absent).
-  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: missing-author-escalation"
-  assert_contains "$tmp/captures/issue-comment-1.md" "no \`Original author:"
-  # Should NOT trigger the PR-side missing-origin warning, since the issue
-  # marker IS present.
-  if [[ -f "$tmp/captures/pr-comment.md" ]]; then
-    assert_not_contains "$tmp/captures/pr-comment.md" "Originating Multica issue link is missing."
-  fi
-  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
-}
-
-# Regression for Hao's review on PR #13: an unrelated `mention://agent/...`
-# anywhere in the PR body must not be promoted to "author" by the parser.
-# Only a line beginning `Original author:` counts. Without that line, route
-# falls through to missing-author-escalation (CTO).
-test_origin_issue_comment_escalates_when_only_unrelated_agent_mention() {
+test_unrelated_author_mentions_are_ignored_because_cto_always_owns_followup() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-action-items-unrelated-author-mention)"
 
-  assert_file_count "$tmp/captures" 0
+  assert_file_count "$tmp/captures" 1
   assert_comment_count "$tmp/captures" 1
+  assert_update_count "$tmp/captures" 1
   assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
-  # Crucial: the unrelated Hao mention in the PR body must NOT become the
-  # routed-to author. If the parser fell back to first-mention, this assertion
-  # would fail (recipient would be "[@author](mention://agent/f804cbdf-...)").
   assert_not_contains "$tmp/captures/issue-comment-1.md" "f804cbdf-33d3-4a98-a6b5-2f7b796915b6"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: missing-author-escalation"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-followup"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
-# Regression for Dustin's hardening: `iteration_count()` must only match
-# real `<!-- consensus: <sha> verdict: ... -->` HTML-comment sentinels. Prose
-# that quotes or discusses a sentinel-shaped string (without the actual
-# `<!--` / `-->` delimiters) must not count toward the iteration cap.
-test_iteration_count_ignores_prose_sentinels() {
+test_prior_iterations_do_not_route_back_to_author() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-prose-mention-not-counted)"
 
-  assert_file_count "$tmp/captures" 0
+  assert_file_count "$tmp/captures" 1
   assert_comment_count "$tmp/captures" 1
-  # Comments contain 1 real sentinel + 2 prose look-alikes. Counter must be 1
-  # (the current SHA's consensus is the 2nd round). If prose were counted,
-  # iter would be 3 and we'd see max-iterations-escalation instead.
-  assert_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration: 2 of 3"
+  assert_update_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-followup"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "max-iterations-escalation"
 }
 
-test_no_cto_delegation_for_approve_consensus() {
+test_approve_consensus_closes_existing_review_issue_without_cto() {
   local tmp
-  tmp="$(run_sweep_with_stubs reviewed-approve-approve)"
+  tmp="$(run_sweep_with_stubs reviewed-approve-approve-review-issue-exists)"
 
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 0
+  assert_update_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-update-1.args" "--status done"
+  assert_not_contains "$tmp/captures/issue-update-1.args" "--assignee"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: approve -->"
 }
 
-test_origin_issue_comment_created_for_debate() {
+test_debate_routes_to_cto_in_pr_review_issue() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-debate)"
 
-  assert_file_count "$tmp/captures" 0
+  assert_file_count "$tmp/captures" 1
   assert_comment_count "$tmp/captures" 1
-  # Debate ALWAYS escalates to CTO_MENTION regardless of iteration count or
-  # author marker — humans break ties; the loop does not retry on disagreement.
+  assert_update_count "$tmp/captures" 1
   assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: debate-escalation"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-debate"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: debate"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Hao verdict: request-changes"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Dustin verdict: approve"
@@ -575,38 +644,16 @@ test_origin_issue_comment_created_for_debate() {
   assert_contains "$tmp/captures/pr-comment.md" "<!-- debate: deadbeef -->"
 }
 
-test_missing_origin_posts_one_pr_warning_and_skips_multica_comment() {
+test_existing_review_outcome_prevents_duplicate_when_final_comment_fails() {
   local tmp
-  tmp="$(run_sweep_with_stubs reviewed-with-action-items-missing-origin)"
-
-  assert_status "$tmp" 0
-  assert_file_count "$tmp/captures" 0
-  assert_comment_count "$tmp/captures" 0
-  assert_contains "$tmp/captures/pr-comment.md" "Originating Multica issue link is missing."
-  assert_contains "$tmp/captures/pr-comment.md" "<!-- multica-origin-missing: deadbeef -->"
-}
-
-test_existing_missing_origin_warning_is_not_duplicated() {
-  local tmp
-  tmp="$(run_sweep_with_stubs reviewed-with-action-items-missing-origin-warning-exists)"
-
-  assert_status "$tmp" 0
-  assert_file_count "$tmp/captures" 0
-  assert_comment_count "$tmp/captures" 0
-  [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "missing-origin warning was duplicated"
-  assert_contains "$tmp/stderr.log" "origin-link=missing-warning-exists stone16/sample-repo#12@deadbeef"
-}
-
-test_existing_origin_comment_prevents_duplicate_when_final_comment_fails() {
-  local tmp
-  tmp="$(PR_SWEEP_EXISTING_ORIGIN_COMMENT=1 PR_SWEEP_PR_COMMENT_FAIL=1 run_sweep_with_stubs reviewed-with-action-items-comment-fails)"
+  tmp="$(PR_SWEEP_EXISTING_ORIGIN_COMMENT=1 PR_SWEEP_PR_COMMENT_FAIL=1 run_sweep_with_stubs reviewed-with-action-items-review-issue-exists)"
 
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 0
   [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "final PR sentinel unexpectedly succeeded"
   assert_contains "$tmp/stderr.log" "[warn] post_pr_comment failed for stone16/sample-repo#12"
-  assert_contains "$tmp/stderr.log" "origin-comment=exists 2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e stone16/sample-repo#12@deadbeef"
+  assert_contains "$tmp/stderr.log" "review-outcome=exists 11111111-1111-1111-1111-000000000001 stone16/sample-repo#12@deadbeef"
 }
 
 test_multica_dispatch_failure_does_not_abort_sweep() {
@@ -616,44 +663,42 @@ test_multica_dispatch_failure_does_not_abort_sweep() {
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 0
-  assert_contains "$tmp/stderr.log" "[warn] dispatch_agent failed for Hao"
-  assert_contains "$tmp/stderr.log" "[warn] dispatch_agent failed for Dustin"
+  assert_contains "$tmp/stderr.log" "[warn] ensure_review_issue failed for stone16/sample-repo#12"
 }
 
-test_origin_comment_failure_does_not_abort_sweep() {
+test_review_outcome_failure_does_not_write_final_sentinel() {
   local tmp
-  tmp="$(PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs reviewed-with-action-items)"
+  tmp="$(PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs reviewed-with-action-items-review-issue-exists)"
 
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 0
   [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "final PR sentinel was written even though CTO delegation failed"
-  assert_contains "$tmp/stderr.log" "[warn] post_origin_issue_comment failed for stone16/sample-repo#12"
+  assert_contains "$tmp/stderr.log" "[warn] post_review_outcome_comment failed for stone16/sample-repo#12"
 }
 
-test_existing_origin_comment_allows_final_comment_without_duplicate() {
+test_existing_review_outcome_allows_final_comment_without_duplicate() {
   local tmp
-  tmp="$(PR_SWEEP_EXISTING_ORIGIN_COMMENT=1 PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs reviewed-with-action-items)"
+  tmp="$(PR_SWEEP_EXISTING_ORIGIN_COMMENT=1 PR_SWEEP_MULTICA_FAIL=1 run_sweep_with_stubs reviewed-with-action-items-review-issue-exists)"
 
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 0
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
-  assert_contains "$tmp/stderr.log" "origin-comment=exists 2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e stone16/sample-repo#12@deadbeef"
+  assert_contains "$tmp/stderr.log" "review-outcome=exists 11111111-1111-1111-1111-000000000001 stone16/sample-repo#12@deadbeef"
 }
 
-test_dispatch_prompt_includes_clickable_pr_links
-test_origin_issue_comment_routes_to_author_when_iter_under_cap
-test_origin_issue_comment_escalates_when_iter_cap_reached
-test_origin_issue_comment_escalates_when_author_marker_missing
-test_origin_issue_comment_escalates_when_only_unrelated_agent_mention
-test_iteration_count_ignores_prose_sentinels
-test_no_cto_delegation_for_approve_consensus
-test_origin_issue_comment_created_for_debate
-test_missing_origin_posts_one_pr_warning_and_skips_multica_comment
-test_existing_missing_origin_warning_is_not_duplicated
-test_existing_origin_comment_prevents_duplicate_when_final_comment_fails
+test_unreviewed_pr_creates_one_review_issue_for_first_reviewer
+test_existing_review_issue_marker_prevents_duplicate_review_request
+test_after_hao_review_routes_dustin_in_same_review_issue
+test_action_items_route_to_cto_in_pr_review_issue
+test_missing_related_issue_still_routes_to_cto_review_issue
+test_unrelated_author_mentions_are_ignored_because_cto_always_owns_followup
+test_prior_iterations_do_not_route_back_to_author
+test_approve_consensus_closes_existing_review_issue_without_cto
+test_debate_routes_to_cto_in_pr_review_issue
+test_existing_review_outcome_prevents_duplicate_when_final_comment_fails
 test_multica_dispatch_failure_does_not_abort_sweep
-test_origin_comment_failure_does_not_abort_sweep
-test_existing_origin_comment_allows_final_comment_without_duplicate
-printf 'PASS: pr-sweep prompt/origin-comment tests\n'
+test_review_outcome_failure_does_not_write_final_sentinel
+test_existing_review_outcome_allows_final_comment_without_duplicate
+printf 'PASS: pr-sweep PR issue routing tests\n'

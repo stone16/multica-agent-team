@@ -8,12 +8,12 @@
 #   3. Decide what's needed:
 #        - converged (consensus / debate sentinel for current SHA) → skip
 #        - both reviewed at this SHA → compute consensus and write sentinel
-#        - only one reviewed → enqueue the other
-#        - neither reviewed → enqueue both
-#   4. If queues non-empty, create one Multica issue per agent with the PR list
-#   5. If review reconciliation is actionable, notify the originating issue
+#        - only one reviewed → request the other reviewer in the PR's issue
+#        - neither reviewed → request Hao first in the PR's issue
+#   4. Create/reuse one Multica issue per PR, keyed by a hidden PR comment
+#   5. If review reconciliation is actionable, notify CTO in that PR issue
 #
-# No LLM is invoked here. Hao / Dustin only run when the queues actually have work.
+# No LLM is invoked here. Hao / Dustin only run when review work exists.
 
 set -euo pipefail
 
@@ -22,13 +22,6 @@ HAO_AGENT="${HAO_AGENT:-Hao}"
 DUSTIN_AGENT="${DUSTIN_AGENT:-Dustin}"
 CTO_AGENT="${CTO_AGENT:-Stometa}"
 CTO_MENTION="${CTO_MENTION:-[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)}"
-
-# Max number of request-changes / block consensus rounds before the loop
-# stops auto-routing back to the original author and escalates to CTO_MENTION.
-# Each round = one distinct head SHA that landed a non-approve consensus.
-# A 4th non-approve round on a 4th distinct SHA escalates instead of pinging
-# the author again. Debate consensus always escalates regardless of count.
-MAX_REVIEW_ITERATIONS="${MAX_REVIEW_ITERATIONS:-3}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -62,11 +55,6 @@ list_open_prs() {
 pr_comments_body() {
   gh pr view "$2" --repo "$GH_OWNER/$1" --json comments \
     --jq '.comments[].body' 2>/dev/null || true
-}
-
-pr_body() {
-  gh pr view "$2" --repo "$GH_OWNER/$1" --json body \
-    --jq '.body // ""' 2>/dev/null || true
 }
 
 post_pr_comment() {
@@ -115,106 +103,152 @@ has_final_sentinel() {
   printf '%s' "$body" | grep -qE "(consensus|debate):[[:space:]]*${sha}\\b"
 }
 
-# ---------- Origin issue dispatch ----------
+# ---------- PR review issue dispatch ----------
 
-origin_issue_id_from_body() {
-  local body="$1"
-  printf '%s\n' "$body" \
-    | sed -nE 's/.*mention:\/\/issue\/([0-9a-fA-F-]{36}).*/\1/p' \
-    | head -1
-}
-
-# Extract the author agent UUID from the PR body's "Original author:" line.
-# Anchored to a line beginning with "Original author:" (optional leading
-# whitespace) so that an unrelated agent mention elsewhere in the body —
-# a thank-you, a CC list, a quoted escalation — does not get treated as
-# the author. Returns empty if the line is absent or carries no agent
-# mention; caller falls back to escalating to CTO_MENTION.
-original_author_id_from_body() {
-  local body="$1"
-  printf '%s\n' "$body" \
-    | grep -E '^[[:space:]]*Original author:' \
-    | sed -nE 's/.*mention:\/\/agent\/([0-9a-fA-F-]{36}).*/\1/p' \
-    | head -1
-}
-
-# Render an `[@Agent](mention://agent/<uuid>)` link given the UUID.
-# We don't have the agent's display name from this side, so use a generic label;
-# Multica renders the link using the canonical name regardless.
-author_mention() {
-  local uuid="$1"
-  printf '[@author](mention://agent/%s)' "$uuid"
-}
-
-# Count distinct prior head SHAs that landed a non-approve consensus on this PR.
-# Used to decide whether to keep auto-iterating with the author or escalate.
-# Reads PR comments (stateless across sweep runs by design — sentinels persist
-# in the PR thread, so the counter survives without any external state store).
-#
-# The regex requires the literal HTML-comment delimiters `<!--` and `-->` so
-# that prose discussing prior verdicts (e.g. quoted sentinels in a postmortem
-# comment, or an excerpt of an earlier sweep notification) does not inflate
-# the counter and trigger a premature CTO escalation. Only actual sentinels
-# emitted by `write_consensus()` count.
-iteration_count() {
-  local body="$1"
-  printf '%s' "$body" \
-    | grep -oE '<!--[[:space:]]*consensus:[[:space:]]*[a-f0-9]+[[:space:]]+verdict:[[:space:]]*(request-changes|block)[[:space:]]*-->' \
-    | awk '{print $3}' \
-    | sort -u \
-    | grep -c . \
-    || true
-}
-
-missing_origin_marker() {
-  local sha="$1"
-  printf '<!-- multica-origin-missing: %s -->' "$sha"
-}
-
-origin_dispatch_marker() {
+review_outcome_marker() {
   local sha="$1"
   printf '<!-- multica-review-dispatched: %s -->' "$sha"
 }
 
-post_missing_origin_warning() {
-  local repo="$1" num="$2" sha="$3"
-  local marker
-  marker="$(missing_origin_marker "$sha")"
-  local comments
-  comments="$(pr_comments_body "$repo" "$num")"
-
-  if printf '%s' "$comments" | grep -Fq "$marker"; then
-    log "    origin-link=missing-warning-exists $GH_OWNER/$repo#$num@$sha"
-    return 1
-  fi
-
-  post_pr_comment "$repo" "$num" "Originating Multica issue link is missing.
-
-Add this near the top of the PR body:
-
-\`Originating Multica issue: [STO-42](mention://issue/<uuid>)\`
-
-The PR sweep will retry Multica dispatch on the next run after the body is fixed.
-
-$marker" >/dev/null || true
-  return 1
+agent_slug() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
-origin_issue_comment_exists() {
-  local issue_id="$1" repo="$2" num="$3" sha="$4"
-  local marker comments
-  marker="$(origin_dispatch_marker "$sha")"
+review_issue_marker() {
+  local issue_id="$1"
+  printf '<!-- multica-pr-review-issue: %s -->' "$issue_id"
+}
+
+review_issue_id_from_comments() {
+  local comments="$1"
+  printf '%s\n' "$comments" \
+    | sed -nE 's/.*<!--[[:space:]]*multica-pr-review-issue:[[:space:]]*([^[:space:]<>]+)[[:space:]]*-->.*/\1/p' \
+    | tail -1
+}
+
+review_request_marker() {
+  local sha="$1" agent="$2"
+  printf '<!-- multica-review-requested: %s agent: %s -->' "$sha" "$(agent_slug "$agent")"
+}
+
+json_id() {
+  sed -nE 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1
+}
+
+issue_comment_has_marker() {
+  local issue_id="$1" marker="$2" log_key="$3" repo="$4" num="$5" sha="$6"
+  local comments
 
   if ! comments=$(multica issue comment list "$issue_id" --limit 100 --output json 2>/dev/null); then
-    log "    [warn] origin_issue_comment_exists failed; will try posting origin comment"
+    log "    [warn] issue_comment_has_marker failed for $issue_id; will try posting"
     return 1
   fi
 
   if printf '%s' "$comments" | grep -Fq "$marker"; then
-    log "    origin-comment=exists $issue_id $GH_OWNER/$repo#$num@$sha"
+    log "    $log_key=exists $issue_id $GH_OWNER/$repo#$num@$sha"
     return 0
   fi
   return 1
+}
+
+review_issue_description() {
+  local repo="$1" num="$2" sha="$3"
+  local pr_list
+  pr_list=$(printf -- "- %s\n" "$(review_queue_item "$repo" "$num" "$sha")")
+
+  cat <<EOF
+This is the single Multica thread for this PR review.
+
+PR: $(review_queue_item "$repo" "$num" "$sha")
+Idempotency key: $(pr_url "$repo" "$num")
+
+The sweep reuses this issue for every head SHA on this PR. New pushes append a new review request comment; older review comments are stale when their SHA differs. The issue is marked \`done\` when both reviewers approve. If either reviewer requests changes, blocks, or disagrees, the sweep keeps this issue open and routes follow-up to CTO here.
+
+PRs to review (format: clickable \`owner/repo#num\` plus \`@\` head SHA - the SHA shows the head when this request was assembled):
+
+$pr_list
+
+Both reviewers are required on every PR; this is not a rotation. Hao owns general code-quality review. Dustin owns security, performance, and adversarial-input review. The lenses differ, but the review depth does not. Documentation-only PRs receive the same dual review - for those, additionally verify that any code, CLI, or API claims in the docs match the current code, and watch for leaked secrets or internal URLs.
+
+Minimum review bar is identical for both reviewers:
+
+- Check out the PR head SHA into an isolated Multica worktree before reading code (see step 2 below). Diff-only review is not sufficient; cross-file references, callers, and adjacent-file conventions only become visible against the full repo.
+- Read the PR diff, linked issue when present, and changed files in their surrounding repo context.
+- Cite \`file:line\` for every finding.
+- Prioritize production-impacting defects over style, naming, or speculative architecture.
+- Re-run the relevant verification when practical; otherwise state the exact verification gap.
+- Use exactly one of \`approve\`, \`request-changes\`, or \`block\`.
+- Do not write the sentinel unless you completed a real review of the current head SHA against the full repo.
+
+Operational reminders:
+
+1. Read the PR's CURRENT \`headRefOid\` immediately before starting the review:
+   \`\`\`
+   gh pr view <num> --repo <owner/repo> --json headRefOid --jq .headRefOid
+   \`\`\`
+   This SHA is the unit of review - the same value MUST be used for the worktree checkout, the code reading, and the sentinel. Treat it as immutable until the sentinel is posted. The \`@<sha>\` shown in the request above may already be stale (commits can land between request assembly and your review); always re-fetch here.
+
+2. Check out the PR head into an isolated Multica worktree against the SHA from step 1. Use this exact command (no \`git clone\`, no other refs):
+   \`\`\`
+   multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>
+   \`\`\`
+   Read code from the worktree path printed by the command - that is the only place where surrounding context, callers, and adjacent files are reliably consistent with the diff.
+
+3. Conduct the review against the worktree. Then, IMMEDIATELY BEFORE posting the sentinel, re-run the \`headRefOid\` check from step 1. If the SHA is unchanged, post your sentinel tagged with that SHA. If the SHA has changed, the review is stale: DO NOT post a sentinel for the old SHA, even with \`verdict: block\`. Discard the review and restart from step 1 against the new SHA - new checkout, new read, new findings - then post. A sentinel must always reflect a review actually conducted on the SHA it tags.
+
+4. If \`multica repo checkout\` fails because the SHA is unreachable (force-push, branch deleted, or the ref otherwise missing), DO NOT post a sentinel for that PR. Instead, post a plain note on this Multica issue summarizing which PR was unreachable and at which SHA; the next sweep will pick up the new head. Writing a sentinel for an SHA you could not actually review pollutes the consensus parser.
+
+5. One review comment per PR. End it with the sentinel exactly:
+   \`\`\`
+   <!-- <hao|dustin>-reviewed: <head-sha> verdict: <approve|request-changes|block> -->
+   \`\`\`
+
+6. Verdicts are exactly one of: \`approve\`, \`request-changes\`, \`block\`. The \`pr-sweep.sh\` parser is strict; other words are ignored.
+
+7. Use the PR link above in your PR comment and in this Multica issue summary. The PR number must remain visible as \`owner/repo#num\`; the URL must be clickable for revisit/check-in.
+
+8. When your assigned review is complete, post a one-line summary comment on this Multica issue and set status to \`in_review\`. If a PR errors out (auth, rate limit, vanished), note it in the summary; the next sweep will retry.
+
+9. If you produce action items (\`request-changes\` or \`block\`), do not @-mention another agent yourself. The sweep posts the reconciled outcome in this same issue after both reviews are reconciled.
+
+10. Do not coordinate with the other reviewer in advance. The script reconciles the two verdicts.
+EOF
+}
+
+create_review_issue() {
+  local repo="$1" num="$2" sha="$3" assignee="$4"
+  local created issue_id
+
+  if ! created=$(review_issue_description "$repo" "$num" "$sha" | multica issue create \
+    --title "PR review - $GH_OWNER/$repo#$num" \
+    --assignee "$assignee" \
+    --priority low \
+    --description-stdin \
+    --output json); then
+    return 1
+  fi
+
+  issue_id="$(printf '%s' "$created" | json_id)"
+  [[ -n "$issue_id" ]] || return 1
+
+  if ! post_pr_comment "$repo" "$num" "$(review_issue_marker "$issue_id")" >/dev/null; then
+    log "    [warn] review issue marker was not written for $GH_OWNER/$repo#$num; duplicate prevention may retry"
+  fi
+
+  printf '%s\n' "$issue_id"
+}
+
+ensure_review_issue() {
+  local repo="$1" num="$2" sha="$3" comments="$4" assignee="$5"
+  local issue_id
+
+  issue_id="$(review_issue_id_from_comments "$comments")"
+  if [[ -n "$issue_id" ]]; then
+    printf '%s\n' "$issue_id"
+    return 0
+  fi
+
+  create_review_issue "$repo" "$num" "$sha" "$assignee"
 }
 
 strip_review_sentinel() {
@@ -232,41 +266,27 @@ review_comment_body() {
     || true
 }
 
-post_origin_issue_comment() {
+post_review_outcome_comment() {
   local issue_id="$1" repo="$2" num="$3" sha="$4" outcome="$5" hao="$6" dustin="$7"
-  local recipient="$8" action_kind="$9" iter="${10:-0}"
-  local link marker hao_body dustin_body comment header iter_line
+  local action_kind="$8"
+  local link marker hao_body dustin_body comment header
   link="$(pr_url "$repo" "$num")"
-  marker="$(origin_dispatch_marker "$sha")"
+  marker="$(review_outcome_marker "$sha")"
   hao_body="$(review_comment_body "$repo" "$num" "hao-reviewed" "$sha")"
   dustin_body="$(review_comment_body "$repo" "$num" "dustin-reviewed" "$sha")"
 
   case "$action_kind" in
-    author-iteration)
-      header="$recipient PR review came back with \`request-changes\`. Please address the items below by pushing a new commit to the PR. The next sweep tick will pick up the new SHA and re-review automatically."
-      iter_line="- Iteration: $((iter + 1)) of $MAX_REVIEW_ITERATIONS (after this round, the next \`request-changes\` consensus will escalate to a human)"
+    cto-followup)
+      header="$CTO_MENTION PR review came back with \`$outcome\`. Please handle the follow-up in this issue by deciding whether to fix, hand off, close, or override."
       ;;
-    max-iterations-escalation)
-      header="$CTO_MENTION PR review loop hit the iteration cap ($MAX_REVIEW_ITERATIONS rounds of \`request-changes\` / \`block\` consensus). Auto-routing has stopped — please decide whether to land, close, hand off to a different author, or override the cap."
-      iter_line="- Iteration count: $iter (cap: $MAX_REVIEW_ITERATIONS — reached)"
-      ;;
-    missing-author-escalation)
-      header="$CTO_MENTION PR review came back with \`request-changes\`, but the PR body has no \`Original author: [@AgentName](mention://agent/<uuid>)\` line, so the loop cannot route the feedback back to an agent. Please decide who handles this PR."
-      iter_line="- Iteration count: $iter (cap: $MAX_REVIEW_ITERATIONS)"
-      ;;
-    debate-escalation)
-      header="$CTO_MENTION Reviewers disagree on this PR — the consensus is split. Please cast the deciding vote (approve / request-changes / block) so the loop can converge."
-      iter_line=""
+    cto-debate)
+      header="$CTO_MENTION Reviewers disagree on this PR. Please cast the deciding vote (approve / request-changes / block) in this issue so the loop can converge."
       ;;
     *)
       log "    [warn] unknown action_kind=$action_kind, defaulting to CTO escalation"
       header="$CTO_MENTION PR review needs routing."
-      iter_line=""
       ;;
   esac
-
-  local body_iter=""
-  [[ -n "$iter_line" ]] && body_iter=$'\n'"$iter_line"
 
   comment=$(cat <<EOF
 $header
@@ -275,8 +295,15 @@ $header
 - Head commit: $sha
 - Final verdict: $outcome
 - Hao verdict: $hao
-- Dustin verdict: $dustin$body_iter
+- Dustin verdict: $dustin
 - Action: $action_kind
+
+## Discussion Protocol
+
+Reply to each reviewer finding in this issue with one of: \`will-fix\`, \`already-fixed\`, \`wont-fix\`, or \`needs-discussion\`.
+State whether the finding is correct, what will change, or why it should not change.
+Keep the thread unresolved until CTO and reviewer agree on the outcome.
+End with a summary comment before marking the thread resolved.
 
 ## Hao Review
 
@@ -290,65 +317,104 @@ $marker
 EOF
 )
 
-  log "    origin-comment=post $issue_id $GH_OWNER/$repo#$num@$sha action=$action_kind iter=$iter"
+  log "    review-outcome=post $issue_id $GH_OWNER/$repo#$num@$sha action=$action_kind"
   if ! printf '%s' "$comment" | multica issue comment add "$issue_id" --content-stdin >/dev/null; then
-    log "    [warn] post_origin_issue_comment failed for $GH_OWNER/$repo#$num (continuing)"
+    log "    [warn] post_review_outcome_comment failed for $GH_OWNER/$repo#$num (continuing)"
     return 1
   fi
   return 0
 }
 
-# Decide how to route a finalized review back to the originating Multica issue.
-# Routing matrix (consensus_kind = "consensus-non-approve" | "debate"):
-#   debate                       → escalate to CTO_MENTION (humans break ties)
-#   non-approve, missing author  → escalate to CTO_MENTION (no agent to ping)
-#   non-approve, iter >= cap     → escalate to CTO_MENTION (cap reached)
-#   non-approve, iter <  cap     → ping original author for another iteration
-dispatch_origin_issue_comment() {
-  local repo="$1" num="$2" sha="$3" outcome="$4" hao="$5" dustin="$6" consensus_kind="$7"
-  local issue_id author_id pr_body_str pr_comments_str iter recipient action_kind
-  pr_body_str="$(pr_body "$repo" "$num")"
-  issue_id="$(origin_issue_id_from_body "$pr_body_str")"
+dispatch_review_request() {
+  local repo="$1" num="$2" sha="$3" comments="$4" agent="$5"
+  local issue_id marker slug comment
+  slug="$(agent_slug "$agent")"
+  marker="$(review_request_marker "$sha" "$agent")"
 
-  if [[ -z "$issue_id" ]]; then
-    post_missing_origin_warning "$repo" "$num" "$sha"
+  if ! issue_id="$(ensure_review_issue "$repo" "$num" "$sha" "$comments" "$agent")"; then
+    log "    [warn] ensure_review_issue failed for $GH_OWNER/$repo#$num"
     return 1
   fi
 
-  if [[ "$consensus_kind" == "debate" ]]; then
-    recipient="$CTO_MENTION"
-    action_kind="debate-escalation"
-    iter=0
-  else
-    pr_comments_str="$(pr_comments_body "$repo" "$num")"
-    iter="$(iteration_count "$pr_comments_str")"
-    : "${iter:=0}"
-    author_id="$(original_author_id_from_body "$pr_body_str")"
-
-    if [[ -z "$author_id" ]]; then
-      recipient="$CTO_MENTION"
-      action_kind="missing-author-escalation"
-    elif (( iter >= MAX_REVIEW_ITERATIONS )); then
-      recipient="$CTO_MENTION"
-      action_kind="max-iterations-escalation"
-    else
-      recipient="$(author_mention "$author_id")"
-      action_kind="author-iteration"
-    fi
+  if ! multica issue update "$issue_id" --status in_progress --assignee "$agent" >/dev/null 2>&1; then
+    log "    [warn] review issue update failed for $issue_id (continuing)"
   fi
 
-  origin_issue_comment_exists "$issue_id" "$repo" "$num" "$sha" \
-    || post_origin_issue_comment "$issue_id" "$repo" "$num" "$sha" "$outcome" "$hao" "$dustin" "$recipient" "$action_kind" "$iter"
+  if issue_comment_has_marker "$issue_id" "$marker" "review-request" "$repo" "$num" "$sha"; then
+    return 0
+  fi
+
+  comment=$(cat <<EOF
+$agent review is requested for $(review_queue_item "$repo" "$num" "$sha").
+
+Follow the instructions in this issue description. Post exactly one PR review comment ending with:
+
+\`\`\`
+<!-- ${slug}-reviewed: <head-sha> verdict: <approve|request-changes|block> -->
+\`\`\`
+
+After posting the PR review, add a one-line summary here and set this issue to \`in_review\`. Do not @-mention another agent; the sweep will move this same issue to the next reviewer or CTO.
+
+$marker
+EOF
+)
+
+  log "    review-request=post $issue_id $GH_OWNER/$repo#$num@$sha agent=$slug"
+  if ! printf '%s' "$comment" | multica issue comment add "$issue_id" --content-stdin >/dev/null; then
+    log "    [warn] dispatch_review_request failed for $agent on $GH_OWNER/$repo#$num (continuing)"
+    return 1
+  fi
+  return 0
+}
+
+dispatch_review_outcome() {
+  local repo="$1" num="$2" sha="$3" outcome="$4" hao="$5" dustin="$6" action_kind="$7" comments="$8"
+  local issue_id marker
+  marker="$(review_outcome_marker "$sha")"
+
+  if ! issue_id="$(ensure_review_issue "$repo" "$num" "$sha" "$comments" "$CTO_AGENT")"; then
+    log "    [warn] ensure_review_issue failed for $GH_OWNER/$repo#$num"
+    return 1
+  fi
+
+  if issue_comment_has_marker "$issue_id" "$marker" "review-outcome" "$repo" "$num" "$sha"; then
+    return 0
+  fi
+
+  if ! post_review_outcome_comment "$issue_id" "$repo" "$num" "$sha" "$outcome" "$hao" "$dustin" "$action_kind"; then
+    return 1
+  fi
+
+  if ! multica issue update "$issue_id" --status in_progress --assignee "$CTO_AGENT" >/dev/null 2>&1; then
+    log "    [warn] review issue update failed for $issue_id (continuing)"
+  fi
+  return 0
+}
+
+close_review_issue_if_known() {
+  local repo="$1" num="$2" sha="$3" comments="$4"
+  local issue_id
+  issue_id="$(review_issue_id_from_comments "$comments")"
+  [[ -n "$issue_id" ]] || return 0
+
+  if multica issue update "$issue_id" --status done >/dev/null 2>&1; then
+    log "    review-issue=done $issue_id $GH_OWNER/$repo#$num@$sha"
+  else
+    log "    [warn] review issue close failed for $issue_id (continuing)"
+  fi
 }
 
 # ---------- Consensus ----------
 
 write_consensus() {
-  local repo="$1" num="$2" sha="$3" hao="$4" dustin="$5"
+  local repo="$1" num="$2" sha="$3" hao="$4" dustin="$5" comments="${6:-}"
+  [[ -n "$comments" ]] || comments="$(pr_comments_body "$repo" "$num")"
 
   if [[ "$hao" == "$dustin" ]]; then
-    if [[ "$hao" != "approve" ]] && ! dispatch_origin_issue_comment "$repo" "$num" "$sha" "consensus: $hao" "$hao" "$dustin" "consensus-non-approve"; then
-      log "    [warn] origin issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
+    if [[ "$hao" == "approve" ]]; then
+      close_review_issue_if_known "$repo" "$num" "$sha" "$comments"
+    elif ! dispatch_review_outcome "$repo" "$num" "$sha" "consensus: $hao" "$hao" "$dustin" "cto-followup" "$comments"; then
+      log "    [warn] review issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
       return 0
     fi
 
@@ -360,8 +426,8 @@ write_consensus() {
       log "    [warn] consensus comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
     fi
   else
-    if ! dispatch_origin_issue_comment "$repo" "$num" "$sha" "debate" "$hao" "$dustin" "debate"; then
-      log "    [warn] origin issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
+    if ! dispatch_review_outcome "$repo" "$num" "$sha" "debate" "$hao" "$dustin" "cto-debate" "$comments"; then
+      log "    [warn] review issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
       return 0
     fi
 
@@ -378,91 +444,7 @@ write_consensus() {
   fi
 }
 
-# ---------- Dispatch ----------
-
-dispatch_agent() {
-  local agent="$1"
-  shift
-  local items=("$@")
-  [[ ${#items[@]} -eq 0 ]] && { log "[dispatch] $agent: empty queue"; return 0; }
-
-  local pr_list
-  pr_list=$(printf -- "- %s\n" "${items[@]}")
-  local sentinel_name
-  sentinel_name=$(printf '%s' "$agent" | tr '[:upper:]' '[:lower:]')
-
-  local description
-  description=$(cat <<EOF
-Automated code review batch dispatched by \`pr-sweep.sh\` (every 15 min from \`stone16/agent-team\`).
-
-For each pull request below, perform a code review per your agent skill (Code Review Verdict format) and post a review comment on the PR ending with your sentinel marker. The PR-sweep script reads the sentinel on the next run; without it your review will not register.
-
-PRs to review (format: clickable \`owner/repo#num\` plus \`@\` head SHA — the SHA shows the head when this batch was assembled):
-
-$pr_list
-
-Both reviewers are required on every PR; this is not a rotation. Hao owns general code-quality review. Dustin owns security, performance, and adversarial-input review. The lenses differ, but the review depth does not. Documentation-only PRs receive the same dual review — for those, additionally verify that any code, CLI, or API claims in the docs match the current code, and watch for leaked secrets or internal URLs.
-
-Minimum review bar is identical for both reviewers:
-
-- Check out the PR head SHA into an isolated Multica worktree before reading code (see step 2 below). Diff-only review is not sufficient; cross-file references, callers, and adjacent-file conventions only become visible against the full repo.
-- Read the PR diff, linked issue, and changed files in their surrounding repo context.
-- Cite \`file:line\` for every finding.
-- Prioritize production-impacting defects over style, naming, or speculative architecture.
-- Re-run the relevant verification when practical; otherwise state the exact verification gap.
-- Use exactly one of \`approve\`, \`request-changes\`, or \`block\`.
-- Do not write the sentinel unless you completed a real review of the current head SHA against the full repo.
-
-Operational reminders:
-
-1. Read the PR's CURRENT \`headRefOid\` immediately before starting the review:
-   \`\`\`
-   gh pr view <num> --repo <owner/repo> --json headRefOid --jq .headRefOid
-   \`\`\`
-   This SHA is the unit of review — the same value MUST be used for the worktree checkout, the code reading, and the sentinel. Treat it as immutable until the sentinel is posted. The \`@<sha>\` shown in the batch above may already be stale (commits can land between batch assembly and your review); always re-fetch here.
-
-2. Check out the PR head into an isolated Multica worktree against the SHA from step 1. Use this exact command (no \`git clone\`, no other refs):
-   \`\`\`
-   multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>
-   \`\`\`
-   Read code from the worktree path printed by the command — that is the only place where surrounding context, callers, and adjacent files are reliably consistent with the diff.
-
-3. Conduct the review against the worktree. Then, IMMEDIATELY BEFORE posting the sentinel, re-run the \`headRefOid\` check from step 1. If the SHA is unchanged, post your sentinel tagged with that SHA. If the SHA has changed, the review is stale: DO NOT post a sentinel for the old SHA, even with \`verdict: block\`. Discard the review and restart from step 1 against the new SHA — new checkout, new read, new findings — then post. A sentinel must always reflect a review actually conducted on the SHA it tags.
-
-4. If \`multica repo checkout\` fails because the SHA is unreachable (force-push, branch deleted, or the ref otherwise missing), DO NOT post a sentinel for that PR. Instead, post a plain note on this Multica issue summarizing which PR was unreachable and at which SHA; the next sweep will pick up the new head. Writing a sentinel for an SHA you could not actually review pollutes the consensus parser.
-
-5. One review comment per PR. End it with the sentinel exactly:
-   \`\`\`
-   <!-- ${sentinel_name}-reviewed: <head-sha> verdict: <approve|request-changes|block> -->
-   \`\`\`
-
-6. Verdicts are exactly one of: \`approve\`, \`request-changes\`, \`block\`. The \`pr-sweep.sh\` parser is strict; other words are ignored.
-
-7. Use the PR link above in your PR comment and in this Multica issue summary. The PR number must remain visible as \`owner/repo#num\`; the URL must be clickable for revisit/check-in.
-
-8. When all PRs are reviewed, post a one-line summary comment on this Multica issue and set status to \`in_review\`. If a PR errors out (auth, rate limit, vanished), note it in the summary; the next sweep will retry.
-
-9. If you produce action items (\`request-changes\` or \`block\`), do not @-mention another agent yourself. The sweep posts the reconciled outcome back to the originating Multica issue after both independent reviews are reconciled.
-
-10. Do not coordinate with the other reviewer in advance. Independent verdicts are the point — the script reconciles.
-EOF
-)
-
-  log "[dispatch] $agent: ${#items[@]} PR(s)"
-  if ! printf '%s' "$description" | multica issue create \
-    --title "PR review batch — ${#items[@]} PR(s)" \
-    --assignee "$agent" \
-    --priority low \
-    --description-stdin \
-    --output json >/dev/null; then
-    log "    [warn] dispatch_agent failed for $agent (continuing)"
-  fi
-}
-
 # ---------- Main ----------
-
-declare -a HAO_QUEUE=()
-declare -a DUSTIN_QUEUE=()
 
 REPOS=$(list_repos)
 log "[scan] enumerated $(echo "$REPOS" | wc -l | tr -d ' ') repos under $GH_OWNER/"
@@ -470,6 +452,7 @@ log "[scan] enumerated $(echo "$REPOS" | wc -l | tr -d ' ') repos under $GH_OWNE
 REPOS_OK=0
 REPOS_ERRORED=0
 PRS_TOTAL=0
+REVIEWS_REQUESTED=0
 
 while IFS= read -r repo; do
   [[ -z "$repo" ]] && continue
@@ -496,7 +479,6 @@ while IFS= read -r repo; do
     [[ -z "$num" ]] && continue
     PRS_TOTAL=$((PRS_TOTAL + 1))
     pr_id="$GH_OWNER/$repo#$num@$sha"
-    pr_item="$(review_queue_item "$repo" "$num" "$sha")"
 
     # Skip self-authored PRs to avoid self-review loops.
     if [[ "$author" == "$HAO_AGENT" || "$author" == "$DUSTIN_AGENT" ]]; then
@@ -515,25 +497,19 @@ while IFS= read -r repo; do
     dustin_v=$(sentinel_verdict "$body" "dustin-reviewed" "$sha")
 
     if [[ -n "$hao_v" && -n "$dustin_v" ]]; then
-      write_consensus "$repo" "$num" "$sha" "$hao_v" "$dustin_v"
+      write_consensus "$repo" "$num" "$sha" "$hao_v" "$dustin_v" "$body"
     elif [[ -n "$hao_v" ]]; then
-      DUSTIN_QUEUE+=("$pr_item")
       log "  [need-dustin] $pr_id (hao=$hao_v)"
+      dispatch_review_request "$repo" "$num" "$sha" "$body" "$DUSTIN_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
     elif [[ -n "$dustin_v" ]]; then
-      HAO_QUEUE+=("$pr_item")
       log "  [need-hao] $pr_id (dustin=$dustin_v)"
+      dispatch_review_request "$repo" "$num" "$sha" "$body" "$HAO_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
     else
-      HAO_QUEUE+=("$pr_item")
-      DUSTIN_QUEUE+=("$pr_item")
-      log "  [need-both] $pr_id"
+      log "  [need-hao-first] $pr_id"
+      dispatch_review_request "$repo" "$num" "$sha" "$body" "$HAO_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
     fi
   done <<<"$prs_raw"
 done <<<"$REPOS"
 
 log "[summary] repos_ok=$REPOS_OK repos_errored=$REPOS_ERRORED prs_seen=$PRS_TOTAL"
-
-# Bash 3 + set -u guards: don't deref empty arrays unsafely.
-dispatch_agent "$HAO_AGENT" "${HAO_QUEUE[@]+"${HAO_QUEUE[@]}"}"
-dispatch_agent "$DUSTIN_AGENT" "${DUSTIN_QUEUE[@]+"${DUSTIN_QUEUE[@]}"}"
-
-log "[done] sweep complete: hao_queue=${#HAO_QUEUE[@]} dustin_queue=${#DUSTIN_QUEUE[@]}"
+log "[done] sweep complete: review_requests=$REVIEWS_REQUESTED"

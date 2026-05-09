@@ -82,7 +82,7 @@ The team's automated code-review chain runs as a GitHub Action in this repo:
 | File | Role |
 |---|---|
 | `.github/workflows/pr-sweep.yml` | Cron schedule (`*/15 * * * *`) + invokes the script |
-| `.github/scripts/pr-sweep.sh` | Deterministic filter — enumerates open PRs across all non-archived `stone16/*` repos, decides which need review, dispatches batched Multica issues to Hao and Dustin, and posts actionable review outcomes back to the originating Multica issue |
+| `.github/scripts/pr-sweep.sh` | Deterministic filter — enumerates open PRs across all non-archived `stone16/*` repos, decides which need review, creates or reuses one Multica issue per PR, and posts actionable review outcomes back to that same issue |
 | `.pr-sweep-ignore` | Optional newline-separated list of repo names to exclude from the sweep |
 
 ### Why this shape
@@ -91,7 +91,7 @@ The cost driver in agent-driven workflows is **agent invocations**, not script r
 
 The review prompt follows the Claude Code review shape we want to emulate: review the current PR head, focus on production-impacting bugs instead of style nits, require evidence in each finding, and leave a machine-readable marker after a real review. We keep that as Markdown prompt and Bash, not a new review service.
 
-Hao and Dustin are not a rotation. For every PR — including documentation-only PRs — the sweep queues both reviewers when neither has reviewed the current SHA. If one reviewer has already posted a current sentinel, the sweep queues only the missing reviewer. Hao carries the general Senior Engineer code-quality lane; Dustin carries the security, performance, dependency-risk, and adversarial-input lane. Their required evidence bar is identical: full repo context (each reviewer checks out the PR head SHA into an isolated Multica worktree before reading code), `file:line` findings, production-impacting issues first, explicit verification status, strict verdict word, and no sentinel without a real review.
+Hao and Dustin are not a rotation. For every PR — including documentation-only PRs — the sweep gets both reviewers onto the current SHA, but it serializes that work through one PR-owned Multica issue instead of opening reviewer batch issues. Hao carries the general Senior Engineer code-quality lane; Dustin carries the security, performance, dependency-risk, and adversarial-input lane. Their required evidence bar is identical: full repo context (each reviewer checks out the PR head SHA into an isolated Multica worktree before reading code), `file:line` findings, production-impacting issues first, explicit verification status, strict verdict word, and no sentinel without a real review.
 
 ### Required GitHub Actions secrets
 
@@ -99,7 +99,7 @@ To enable the workflow, set these secrets on this repository (`stone16/agent-tea
 
 | Secret | What it is | Scope |
 |---|---|---|
-| `MULTICA_TOKEN` | Personal access token for the Hao/Eng Multica agent identity | Used by `multica login --token` so the script can create review-dispatch issues and comment on originating issues |
+| `MULTICA_TOKEN` | Personal access token for the Hao/Eng Multica agent identity | Used by `multica login --token` so the script can create/update PR review issues and comments |
 | `GH_PAT` | GitHub Personal Access Token | `repo` scope (read access to all `stone16/*` repos, including private). The default `GITHUB_TOKEN` only sees this one repo, so a PAT is required to enumerate cross-repo PRs |
 
 Both are required. The workflow's first step fails loud if either is missing.
@@ -122,29 +122,31 @@ When both reviewers have written sentinels for the same SHA, the script writes o
 
 The next sweep skips PRs that already have a final sentinel for the current SHA. New commits invalidate the sentinel automatically (different SHA).
 
-If the reconciled outcome has action items (`request-changes`, `block`, or reviewer disagreement), the script parses both `mention://issue/<uuid>` and `mention://agent/<uuid>` links from the PR body and posts one Multica comment on the originating issue with the PR URL, head commit, final verdict, both reviewer verdicts, the matching review bodies with review sentinels stripped, and an `Action:` line indicating one of:
+Each PR gets exactly one Multica review issue. The PR URL is the logical idempotency key; the durable mapping is stored on that PR thread as:
+
+```
+<!-- multica-pr-review-issue: <issue-id> -->
+```
+
+The script does not require a PR body to name an originating Multica issue or original author. That condition was wrong: not every PR starts from Multica. PR review state now lives in the PR-owned review issue.
+
+Reviewer dispatch is serialized through the single issue to avoid multiple Multica issues for one PR:
+
+- If neither reviewer has reviewed the current SHA, the issue is assigned to Hao first.
+- After Hao's sentinel appears, the same issue is assigned to Dustin.
+- If Dustin reviewed first for any reason, the same issue is assigned to Hao.
+- New commits append a new review-request comment to the same issue; the head SHA makes older comments stale.
+
+If the reconciled outcome has action items (`request-changes`, `block`, or reviewer disagreement), the script posts one Multica comment in the PR review issue with the PR URL, head commit, final verdict, both reviewer verdicts, the matching review bodies with review sentinels stripped, and an `Action:` line indicating one of:
 
 | `Action:` value | Recipient mention | When |
 |---|---|---|
-| `author-iteration` | `[@author](mention://agent/<author-uuid>)` | Non-approve consensus, author marker present, iteration count under cap. Pings the original author to push fixes; the next sweep tick re-reviews. |
-| `max-iterations-escalation` | `CTO_MENTION` | Non-approve consensus and `MAX_REVIEW_ITERATIONS` (default 3) prior request-changes consensuses on distinct SHAs. Auto-routing stops; human decides. |
-| `missing-author-escalation` | `CTO_MENTION` | Non-approve consensus but no `Original author:` line in PR body. Falls back to human (e.g., human-authored PRs). |
-| `debate-escalation` | `CTO_MENTION` | Reviewers disagree. Always escalates regardless of iteration count. |
+| `cto-followup` | `CTO_MENTION` | Hao and Dustin agree on `request-changes` or `block`. CTO owns the next step in the same issue. |
+| `cto-debate` | `CTO_MENTION` | Reviewers disagree. CTO casts the deciding vote in the same issue. |
 
-Iteration count is derived from prior `<!-- consensus: <sha> verdict: (request-changes\|block) -->` sentinels on the PR — distinct SHAs only. The sweep is stateless across runs; the counter persists in PR comments.
+Follow-up is discussion-first, not blind stale-marking. CTO replies to each reviewer finding in the Multica issue with one of `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`, states whether the finding is correct, and keeps the thread unresolved until CTO and reviewer agree. Once there is consensus, CTO posts a final summary and marks the thread resolved manually.
 
-Every PR body must include the routing preamble near the top:
-
-```
-Originating Multica issue: [STO-42](mention://issue/<uuid>)
-Original author: [@AgentName](mention://agent/<uuid>)
-```
-
-The first line is required for every PR. The second line is required for agent-authored PRs; human-authored PRs may omit it (the loop will fall back to `missing-author-escalation`).
-
-If the issue link is missing, the script posts one idempotent PR warning with `<!-- multica-origin-missing: <sha> -->`, skips the Multica comment, and retries on the next sweep after the PR body is fixed. It does not create a fallback issue.
-
-`MAX_REVIEW_ITERATIONS` is configurable via env var on the workflow (default `3`). To raise/lower the cap, set it in `.github/workflows/pr-sweep.yml` under `env:`.
+If both reviewers approve, the script writes the PR consensus sentinel and marks the review issue `done` without mentioning CTO. If the PR is closed or merged before approval, close the review issue manually; the sweep only enumerates open PRs.
 
 Reviewer behavior is in `agents/senior-engineer/skill.md` (Hao) and `agents/security-perf-reviewer/skill.md` (Dustin). Do not edit the sentinel format in only one place — change both, and re-sync to Multica via `multica skill update`.
 
