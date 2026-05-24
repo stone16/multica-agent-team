@@ -4,7 +4,7 @@
 Consensus `request-changes` and `block` PR reviews are adjudicated and resolved by the agent-team autopilot loop before they require Stometa to touch the PR.
 
 ## Context
-The implementation belongs in `stone16/agent-team`, not `multica-ai/multica`: this repo owns the GitHub Action, shell orchestrator, and agent skill prompts for PR review automation. Today `.github/scripts/pr-sweep.sh` enumerates `stone16/*` PRs, parses reviewer sentinels from PR comments, creates or reuses one Multica review issue per PR, and dispatches Hao/Dustin through that issue (`.github/scripts/pr-sweep.sh:44`, `.github/scripts/pr-sweep.sh:88`, `.github/scripts/pr-sweep.sh:117`, `.github/scripts/pr-sweep.sh:328`). The workflow already runs every 15 minutes and uses the Multica CLI plus GitHub PAT from this repo's Actions secrets (`.github/workflows/pr-sweep.yml:7`, `.github/workflows/pr-sweep.yml:26`). The missing arc is after both reviewers agree on `request-changes` or `block`: the script currently posts `Action: cto-followup`, assigns Stometa, and asks for discussion (`.github/scripts/pr-sweep.sh:278`, `.github/scripts/pr-sweep.sh:291`, `.github/scripts/pr-sweep.sh:370`, `.github/scripts/pr-sweep.sh:416`). Double approve already closes the review issue and writes the deterministic consensus sentinel (`.github/scripts/pr-sweep.sh:413`, `.github/scripts/pr-sweep.sh:421`).
+The implementation belongs in `stone16/agent-team`, not `multica-ai/multica`: this repo owns the GitHub Action, shell orchestrator, and agent skill prompts for PR review automation. Today `.github/scripts/pr-sweep.sh` enumerates `stone16/*` PRs, parses reviewer sentinels from PR comments, creates or reuses one Multica review issue per PR, and dispatches Hao/Dustin through that issue (`.github/scripts/pr-sweep.sh:44`, `.github/scripts/pr-sweep.sh:88`, `.github/scripts/pr-sweep.sh:117`, `.github/scripts/pr-sweep.sh:328`). The workflow already runs every 15 minutes and uses the Multica CLI plus GitHub PAT from this repo's Actions secrets (`.github/workflows/pr-sweep.yml:8`, `.github/workflows/pr-sweep.yml:27`). The missing arc is after both reviewers agree on `request-changes` or `block`: the script currently posts `Action: cto-followup`, assigns Stometa, and asks for discussion (`.github/scripts/pr-sweep.sh:278`, `.github/scripts/pr-sweep.sh:291`, `.github/scripts/pr-sweep.sh:370`, `.github/scripts/pr-sweep.sh:416`). Double approve already closes the review issue and writes the deterministic consensus sentinel (`.github/scripts/pr-sweep.sh:413`, `.github/scripts/pr-sweep.sh:421`).
 
 ## Proposed Design
 Keep `agent-team` as the only code and prompt home. The Multica product repo is not part of this implementation; Multica is used through the existing autopilot surface: issue assignment, issue comments, `multica repo checkout`, and `multica issue` commands.
@@ -16,6 +16,8 @@ The fixer input source is the Multica review outcome comment produced by the swe
 The report landing for this checkpoint is the PR-owned Multica review issue. That is the durable surface already keyed from the PR thread through `<!-- multica-pr-review-issue: <issue-id> -->` (`.github/scripts/pr-sweep.sh:117`, `.github/scripts/pr-sweep.sh:122`, `.github/scripts/pr-sweep.sh:234`). Ace-wide or product UI summary remains outside this repo until Stometa chooses a final surface.
 
 Reversible decision: if all findings are rejected and no code change is needed, the fixer pushes an explicit empty resolution commit. The next 15-minute sweep then sees a new head SHA and requests Hao/Dustin again. Rejected alternative: let the ledger alone mark the PR ready; that bypasses the existing approve stop signal. Rejected alternative: make the sweep re-trigger reviewers from ledger state without a new commit; that changes the cost model from commit-driven to state-driven.
+
+Accepted MVP decision from STO-132: rejection handling is soft, not a machine-readable stable-finding-ID protocol. Rejected findings are written as prose in the fixer result table. The next reviewer pass is instructed to read prior fixer result comments and not re-raise an already rejected finding unless it has new code evidence. A per-PR `MAX_FIXER_ROUNDS` guard bounds any reviewer/fixer oscillation and escalates to human follow-up when the guard is reached. This is reversible: if production evidence shows repeated same-finding loops despite the guard, add stable finding IDs as a later precision upgrade.
 
 ## Data Model
 No database migration and no new state store.
@@ -29,10 +31,9 @@ Existing PR comment markers stay unchanged:
 Add markers to comments in the same PR-owned Multica issue:
 
 - Fixer request idempotency: `<!-- multica-fixer-requested: <sha> -->`.
-- Per-finding ledger: `<!-- multica-finding: <original-sha> id: <stable-id> reviewer: <hao|dustin> state: <fixed|rejected|attempted-unconverged|needs-human-decision> commit: <sha|none> -->`.
-- Fixer run summary: `<!-- multica-fixer-summary: <original-sha> verdict: <resolved|human-needed> followup: <new-head-sha|none> -->`.
+- Fixer run summary: `<!-- multica-fixer-summary: <original-sha> verdict: <resolved|human-needed> followup: <new-head-sha|none> round: <n> -->`.
 
-Finding IDs are stable for the same original SHA. They are derived from original SHA, reviewer, cited `file:line`, and normalized finding text. The visible Markdown next to each marker must include source reviewer, source citation, state, reason, verification command/result, and commit link when present.
+The MVP does not add per-finding machine-readable IDs. The visible Markdown result table is the per-finding ledger and must include source reviewer, source citation, state, reason, verification command/result, and commit link when present. The sweep derives max-round state by counting prior `multica-fixer-summary` markers in the PR-owned issue, not by trying to match individual free-text findings across reviewer passes.
 
 ## Runtime Flow
 1. The 15-minute GitHub Action runs `.github/scripts/pr-sweep.sh` from `stone16/agent-team`.
@@ -44,12 +45,12 @@ Finding IDs are stable for the same original SHA. They are derived from original
 7. The fixer reads the outcome comment, fetches the current PR `headRefOid`, and checks out the exact original head SHA with `multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>`.
 8. The fixer adjudicates each finding against full repo context. Reviewer identity is not evidence; the claim must be verified in code.
 9. Valid findings are fixed, verified locally, committed, and pushed to the PR branch. Before pushing, the fixer re-checks that PR `headRefOid` still equals the original SHA. If it changed, the fixer stops and writes a stale-head note with no ledger.
-10. Invalid findings are recorded as `rejected` with a concise reason. If all findings are rejected and no file changed, the fixer pushes an empty resolution commit.
+10. Invalid findings are recorded as `rejected` in the visible result table with a concise reason. If all findings are rejected and no file changed, the fixer pushes an empty resolution commit.
 11. Failed attempts are recorded as `attempted-unconverged`; product, architecture, or policy blockers are recorded as `needs-human-decision`.
-12. The fixer posts one result comment containing all per-finding markers and one summary marker. A pushed follow-up commit naturally restarts Hao/Dustin review on the next sweep. The loop ends only when the reviewers write consensus approve.
+12. The fixer posts one result comment containing one row per finding plus one summary marker. A pushed follow-up commit naturally restarts Hao/Dustin review on the next sweep. The loop ends when the reviewers write consensus approve, or when `MAX_FIXER_ROUNDS` is reached and the sweep escalates to human follow-up instead of dispatching another fixer run.
 
 ## Observability
-The script must log deterministic transitions without reviewer prose: `fixer-request=post|exists`, `fixer-summary=resolved|human-needed`, `fixer-stale-head`, and `fixer-dispatch-failed`. Fixer comments must include verification command names and pass/fail results. A summary renderer must be able to classify a PR from Multica issue markers alone: approved, waiting on reviewer pass for a new SHA, resolved by fixer and awaiting reviewer approve, or human-needed.
+The script must log deterministic transitions without reviewer prose: `fixer-request=post|exists`, `fixer-summary=resolved|human-needed`, `fixer-stale-head`, `fixer-round-limit`, and `fixer-dispatch-failed`. Fixer comments must include verification command names and pass/fail results. A summary renderer must be able to classify a PR from Multica issue summary markers alone: approved, waiting on reviewer pass for a new SHA, resolved by fixer and awaiting reviewer approve, or human-needed.
 
 ## Security
 Reviewer prose is untrusted input. The fixer must not execute commands copied from review text unless they match repository scripts or package metadata. Use GitHub and Multica credentials only through `gh` and `multica`; never print tokens. Never force-push. Do not push to forks or protected branches unless `gh pr view` confirms the authenticated actor can update the PR branch. Do not assign the fixer to adjudicate its own reviewer findings. Mark uncertain authorization, policy, or branch-protection cases as `needs-human-decision`.
@@ -60,6 +61,7 @@ Reviewer prose is untrusted input. The fixer must not execute commands copied fr
 - Create a separate service or queue: rejected because the existing PR-owned Multica issue, GitHub sentinels, and scheduled shell sweep already provide idempotent routing and convergence.
 - Use GitHub PR comments as the worker's primary input: rejected because the sweep already normalizes exact-SHA reviewer bodies into the PR-owned Multica issue; duplicating that parser increases drift.
 - Let the fixer write final approve sentinels: rejected because Hao/Dustin consensus approve is the existing deterministic stop signal.
+- Add stable per-finding IDs in the MVP: rejected because the current reviewer output is free-form Markdown, so exact cross-round matching is a real new protocol. Soft rejection handling plus `MAX_FIXER_ROUNDS` bounds cost now; stable IDs remain available if observed loops justify the added protocol.
 
 ## Verification
 Run these commands from `stone16/agent-team` after implementation:
@@ -67,7 +69,7 @@ Run these commands from `stone16/agent-team` after implementation:
 ```bash
 bash -n .github/scripts/pr-sweep.sh
 bash tests/pr-sweep.test.sh
-rg -n "fixer-followup|multica-fixer-requested|multica-finding|attempted-unconverged|needs-human-decision" README.md agents .github/scripts tests docs
+rg -n "fixer-followup|multica-fixer-requested|multica-fixer-summary|MAX_FIXER_ROUNDS|attempted-unconverged|needs-human-decision" README.md agents .github/scripts tests docs
 rg -n "^TODO_DECISION:" README.md .github/scripts tests docs
 ```
 
@@ -79,6 +81,8 @@ Expected assertions:
 - `multica-fixer-requested` prevents duplicate fixer dispatch.
 - Final PR sentinel is not written when fixer dispatch fails.
 - A pushed fix commit or empty resolution commit causes the next sweep to request Hao/Dustin on the new SHA.
+- Rejected findings remain prose in the fixer result table; no stable finding-ID protocol is required for the MVP.
+- Reaching `MAX_FIXER_ROUNDS` escalates to human follow-up and does not dispatch another fixer run.
 - Human-needed ledgers do not trigger duplicate fixer runs.
 
 ## Checkpoints
@@ -91,17 +95,18 @@ Expected assertions:
 - Depends on: none
 
 #### Scope
-Update `README.md` and the relevant agent skills to describe the fixer-first follow-up path, the four-state ledger, and the preserved Hao/Dustin approve stop signal. Keep all docs in `stone16/agent-team`.
+Update `README.md` and the relevant agent skills to describe the fixer-first follow-up path, the four-state result table, soft rejection handling, the max-round guard, and the preserved Hao/Dustin approve stop signal. Keep all docs in `stone16/agent-team`.
 
 #### Acceptance Criteria
 - README names `.github/scripts/pr-sweep.sh` as the orchestrator and states fixer work happens in the same PR-owned Multica issue.
 - Reviewer/fixer instructions require exact head-SHA checkout before adjudication.
 - The four states are documented with required evidence for each.
+- Reviewer instructions require checking previous fixer result comments before re-raising a rejected finding.
 - Repo docs state that no implementation artifact belongs in `multica-ai/multica`.
 
 #### Verification Commands
 ```bash
-rg -n "fixer-followup|multica-finding|fixed|rejected|attempted-unconverged|needs-human-decision" README.md agents docs
+rg -n "fixer-followup|multica-fixer-summary|fixed|rejected|attempted-unconverged|needs-human-decision|MAX_FIXER_ROUNDS" README.md agents docs
 rg -n "multica-ai/multica|stone16/agent-team" README.md docs
 ```
 
@@ -119,6 +124,7 @@ Modify `.github/scripts/pr-sweep.sh` and `tests/pr-sweep.test.sh` so consensus `
 - Consensus action items assign the configured fixer, not CTO.
 - Debate still assigns CTO.
 - `<!-- multica-fixer-requested: <sha> -->` prevents duplicate fixer requests.
+- When prior fixer summaries for the PR reach `MAX_FIXER_ROUNDS`, the sweep routes human follow-up instead of fixer follow-up.
 - The PR consensus sentinel is written only after the fixer request is present or successfully posted.
 
 #### Verification Commands
@@ -140,15 +146,15 @@ Add or update the configured fixer agent skill with the runtime contract: read t
 #### Acceptance Criteria
 - The fixer has an explicit trigger for `Action: fixer-followup`.
 - The fixer refuses stale head SHAs before push.
-- The fixer distinguishes all four states and knows when not to push.
+- The fixer distinguishes all four states in a visible result table and knows when not to push.
 - The fixer pushes an empty resolution commit only when all findings are rejected and no code changed.
 
 #### Verification Commands
 ```bash
-rg -n "Action: fixer-followup|multica repo checkout|headRefOid|allow-empty|attempted-unconverged|needs-human-decision" agents README.md docs
+rg -n "Action: fixer-followup|multica repo checkout|headRefOid|allow-empty|rejected|attempted-unconverged|needs-human-decision" agents README.md docs
 ```
 
-### Checkpoint 04: Persist and render the per-finding ledger
+### Checkpoint 04: Persist and render the soft result trail
 
 - ID: cp-04
 - Type: backend
@@ -156,19 +162,20 @@ rg -n "Action: fixer-followup|multica repo checkout|headRefOid|allow-empty|attem
 - Depends on: cp-02 cp-03
 
 #### Scope
-Extend the issue-comment contract and tests so fixer result comments are machine-readable and human-readable. Keep the ledger in the PR-owned Multica review issue.
+Extend the issue-comment contract and tests so fixer result comments carry a machine-readable summary marker and a human-readable per-finding result table. Keep the result trail in the PR-owned Multica review issue.
 
 #### Acceptance Criteria
-- Each reviewer finding has exactly one `multica-finding` marker for the original SHA in a fixer result comment.
+- Each reviewer finding has exactly one visible result row for the original SHA in a fixer result comment.
 - Fixed findings include a commit SHA and verification evidence.
 - Rejected findings include a concise reason.
 - `attempted-unconverged` and `needs-human-decision` classify the PR as human-needed.
-- A summary renderer can produce three buckets from markers: processed PRs, no-current-human-action PRs, and human-needed PRs.
+- A summary renderer can produce three PR-level buckets from `multica-fixer-summary` markers: processed PRs, no-current-human-action PRs, and human-needed PRs.
+- No stable per-finding ID is required in the MVP.
 
 #### Verification Commands
 ```bash
 bash tests/pr-sweep.test.sh
-rg -n "multica-finding|multica-fixer-summary|human-needed|waiting reviewer" .github/scripts tests README.md docs
+rg -n "multica-fixer-summary|human-needed|waiting reviewer|MAX_FIXER_ROUNDS" .github/scripts tests README.md docs
 ```
 
 ### Checkpoint 05: Prove the end-to-end loop
@@ -185,6 +192,7 @@ Exercise the loop with test stubs and one non-production test PR if available. D
 - Seeded non-approve reviewer sentinels produce one fixer request.
 - A fixer result with a pushed follow-up commit causes the next sweep to request Hao/Dustin for the new SHA.
 - A human-needed fixer result does not produce duplicate fixer requests.
+- Repeated non-approve rounds stop at `MAX_FIXER_ROUNDS` and route to human follow-up.
 - Double approve on the follow-up SHA marks the review issue done.
 
 #### Verification Commands
