@@ -85,6 +85,8 @@ The team's automated code-review chain runs as a GitHub Action in this repo:
 | `.github/scripts/pr-sweep.sh` | Deterministic filter — enumerates open PRs across all non-archived `stone16/*` repos, decides which need review, creates or reuses one Multica issue per PR, and posts actionable review outcomes back to that same issue |
 | `.pr-sweep-ignore` | Optional newline-separated list of repo names to exclude from the sweep |
 
+The STO-136 fixer-first follow-up design lives in `docs/pr-review-fixer-architecture.md`. Keep implementation, prompt, and test changes for that workflow in this `stone16/agent-team` repo; `multica-ai/multica` is only the runtime platform reached through Multica autopilot and the `multica` CLI.
+
 ### Why this shape
 
 The cost driver in agent-driven workflows is **agent invocations**, not script runs. By doing the deterministic filter (sentinel match, SHA compare) in the GH-Actions-hosted shell script, we only invoke Hao or Dustin when there is genuinely new code to review. Empty sweeps cost ~$0.
