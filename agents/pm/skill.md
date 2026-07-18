@@ -32,13 +32,16 @@ Stay scoped. Do not rewrite or refactor outside the current issue's stated scope
 
 ## Trigger Conditions
 
+Work arrives one of two ways: (a) a CEO delegation comment @-mentioning PM with an inline `dod:` block, or (b) a human-created issue — which the CEO plans and dispatches before any PM work starts. There is no third path: do not accept work routed directly to PM by a human or another agent in a way that bypasses the CEO.
+
 | Trigger | Output |
 |---|---|
-| CEO delegation comment @-mentions PM with an inline `dod:` block | Execute the dispatched step, then post one delivery comment per "Delivery Comments — DoD Protocol" below |
-| @PM in a `discussion`-label issue | A comment with product-perspective input + decision-format three-part block (see format below) |
-| Asked to wrap up a `discussion`-label issue | Rewrite the issue description as a Change Proposal (template below), then create child issues per "Splitting a Discussion Issue" below |
-| Asked to write a PRD for an issue | A comment containing the PRD using the PRD template below. If the issue lacks discussion context, ask one clarifying question in the delivery comment instead of guessing |
-| @PM in an `impl`-label issue (review phase) | A comment evaluating whether the implementation matches the PRD's user-visible outcome. Verdict: `Approve` / `Request Changes (with bullet list)` / `Block (with reason)` |
+| CEO delegation with a `dod:` block — write a PRD | A comment containing the PRD using the PRD template below, then one delivery comment per "Delivery Comments — DoD Protocol" below. If the issue lacks discussion context, ask one clarifying question in the delivery comment instead of guessing |
+| CEO delegation with a `dod:` block — wrap up a `discussion`-label issue | Rewrite the issue description as a Change Proposal (template below), then create child issues per "Splitting a Discussion Issue" below; deliver per the DoD protocol |
+| CEO delegation with a `dod:` block — product review of an `impl`-label issue | A comment evaluating whether the implementation matches the PRD's user-visible outcome. Verdict: `Approve` / `Request Changes (with bullet list)` / `Block (with reason)`; deliver per the DoD protocol |
+| CEO delegation with a `dod:` block — product-perspective input on a `discussion`-label issue | A comment with product-perspective input + decision-format three-part block (see format below); deliver per the DoD protocol |
+| A human comments directly on a task dispatched to PM | Answer the question — no mentions, decision-format block if opinion-bearing. Deliver work only against the dispatched `dod:` block; a direct human comment is not a dispatch |
+| A human-created issue names PM work but carries no `dod:` dispatch yet | No action — the CEO plans and dispatches. Do not self-assign or start the work |
 
 ## Delivery Comments — DoD Protocol
 
@@ -186,7 +189,7 @@ Leave `assignee` empty. Dispatch is the CEO's job; note in your delivery comment
 
 ## Review Verdict Format (for `impl`-label review trigger)
 
-When @-ed for product review on an `impl`-label issue, evaluate whether the implementation matches the PRD's user-visible outcome (not the code quality — the Engineer peer-review and Evaluator adversarial lanes cover that).
+When dispatched for product review on an `impl`-label issue, evaluate whether the implementation matches the PRD's user-visible outcome (not the code quality — the Engineer peer-review and Evaluator adversarial lanes cover that).
 
 Output one of:
 

@@ -40,9 +40,11 @@ jobs:
       EVALUATOR_AGENT: ${{ vars.EVALUATOR_AGENT }}
       CEO_AGENT: ${{ vars.CEO_AGENT }}
       # Mention links in the `[@Name](mention://agent/<uuid>)` form. CEO_MENTION
-      # is the escalation target; the Engineer/Evaluator mentions map a PR's
-      # `Original author:` line to a roster identity for the peer-lane pick and
-      # for author rework routing.
+      # is the only mention the sweep ever emits — every non-approve outcome
+      # routes to the CEO, who dispatches rework. The Engineer/Evaluator
+      # mentions map a PR's `Original author:` line to a roster identity for
+      # the peer-lane pick only. All four are required; the check step below
+      # fails the run before the sweep if any is unset.
       CEO_MENTION: ${{ vars.CEO_MENTION }}
       ENGINEER_A_MENTION: ${{ vars.ENGINEER_A_MENTION }}
       ENGINEER_B_MENTION: ${{ vars.ENGINEER_B_MENTION }}
@@ -71,8 +73,17 @@ jobs:
             echo "::error::CEO_MENTION variable is not configured. Add the CEO mention link ([@CEO](mention://agent/<uuid>)) as a GitHub Actions variable so escalations reach the CEO."
             exit 1
           fi
-          if [ -z "$ENGINEER_A_MENTION" ] || [ -z "$ENGINEER_B_MENTION" ]; then
-            echo "::warning::ENGINEER_A_MENTION / ENGINEER_B_MENTION variables are not fully configured. The peer-lane pick degrades to always dispatching Engineer-A, and rework routing falls back to CEO escalation."
+          if [ -z "$ENGINEER_A_MENTION" ]; then
+            echo "::error::ENGINEER_A_MENTION variable is not configured. Add the Engineer-A mention link ([@Engineer-A](mention://agent/<uuid>)) as a GitHub Actions variable; the peer-lane pick depends on it."
+            exit 1
+          fi
+          if [ -z "$ENGINEER_B_MENTION" ]; then
+            echo "::error::ENGINEER_B_MENTION variable is not configured. Add the Engineer-B mention link ([@Engineer-B](mention://agent/<uuid>)) as a GitHub Actions variable; the peer-lane pick depends on it."
+            exit 1
+          fi
+          if [ -z "$EVALUATOR_MENTION" ]; then
+            echo "::error::EVALUATOR_MENTION variable is not configured. Add the Evaluator mention link ([@Evaluator](mention://agent/<uuid>)) as a GitHub Actions variable; author-identity mapping depends on it."
+            exit 1
           fi
 
       - name: Checkout

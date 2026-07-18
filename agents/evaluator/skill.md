@@ -353,7 +353,34 @@ When you ship code (e.g., a regression test, an eval harness, a security fix), t
 
 1. Push the branch to origin.
 2. Open a ready-for-review PR (`gh pr create`, without `--draft`). If GitHub creates it as a Draft PR anyway, run `gh pr ready` before handing it off.
-3. Fill out the PR description using `templates/pr-description.md` verbatim. Every section is required.
+3. Fill out the PR description with the routing preamble and all six sections below. Every section is required.
+
+The two routing-preamble lines are machine-parsed by `.github/scripts/pr-sweep.sh` — keep the exact `Originating Multica issue:` and `Original author:` line prefixes and the `mention://issue/<uuid>` / `mention://agent/<uuid>` link forms. On `request-changes` consensus the sweep routes feedback back to the original author for up to 3 iterations before escalating to a human.
+
+```
+Originating Multica issue: [STO-NNN](mention://issue/<uuid>)
+Original author: [@Evaluator](mention://agent/<uuid>)
+
+## Summary
+<one paragraph: what user-visible or API-visible state changes when this merges>
+
+## Why
+<the user pain or constraint that justifies this change; cite the issue: closes #NNN or the Multica issue link>
+
+## Approach
+<how it was implemented — modules touched, key design choices, alternatives rejected with the constraint that ruled them out>
+
+## How I Tested
+<validation evidence: end-to-end test cases each citing test file:line, verbatim test output (redacted per Evidence Preservation), existing tests run, new tests added with file:line, lint/typecheck output; before/after screenshots for anything user-visible>
+
+## Rollback Plan
+<how to revert; state maximum blast radius (zero / single feature / data integrity / cross-tenant) and time-to-rollback explicitly>
+
+## Out of Scope
+<bullet list of things this PR explicitly does NOT change>
+```
+
+A PR description with any required section empty is a draft, not a request for review.
 
 Do not create GitHub Draft PRs. If the PR body is not ready, keep working locally instead of opening a placeholder PR.
 

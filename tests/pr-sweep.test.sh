@@ -278,7 +278,7 @@ COMMENTS
   elif [[ "$scenario" == "reviewed-with-prose-mention-not-counted" ]]; then
     # Prose that quotes prior sentinels must not inflate the iteration
     # counter — only real `<!-- consensus: ... -->` sentinels count. One real
-    # prior round + prose fakes = iteration 2 of 3, NOT a cap escalation.
+    # prior round + prose fakes = advisory iteration 2 of 3, NOT cap-reached.
     cat <<'COMMENTS'
 Earlier we noted the consensus: feedfeedfeedfeedfeedfeedfeedfeedfeedfeed verdict: request-changes call was wrong.
 
@@ -480,7 +480,7 @@ test_unreviewed_pr_creates_one_review_issue_for_peer_engineer() {
   assert_contains "$tmp/captures/issue-1.description.md" "The Evaluator adversarial lane owns security, performance, dependency-risk, and adversarial-input review."
   assert_contains "$tmp/captures/issue-1.description.md" "Documentation-only PRs receive the same dual review"
   assert_contains "$tmp/captures/issue-1.description.md" "Minimum review bar is identical for both lanes:"
-  assert_contains "$tmp/captures/issue-1.description.md" "rework to the PR's original author in this issue for up to 3 iterations"
+  assert_contains "$tmp/captures/issue-1.description.md" "Every non-approve outcome — agreed request-changes, agreed block, or lane disagreement — is escalated to the CEO in this issue; the sweep never @-mentions the PR's author."
   assert_contains "$tmp/captures/issue-1.description.md" "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
   assert_contains "$tmp/captures/issue-1.description.md" "If \`multica repo checkout\` fails because the SHA is unreachable"
   assert_contains "$tmp/captures/issue-1.description.md" "A sentinel must always reflect a review actually conducted on the SHA it tags"
@@ -548,7 +548,9 @@ test_after_engineer_review_routes_evaluator_in_same_review_issue() {
   assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: evaluator -->"
 }
 
-test_nonapprove_consensus_routes_rework_to_original_author() {
+# Leader-only routing: EVERY non-approve reconciled outcome mentions ONLY the
+# CEO. The sweep never @-mentions the PR's author — the CEO dispatches rework.
+test_nonapprove_consensus_escalates_to_ceo_not_author() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-action-items)"
 
@@ -557,21 +559,25 @@ test_nonapprove_consensus_routes_rework_to_original_author() {
   assert_update_count "$tmp/captures" 1
   assert_pr_comment_count "$tmp/captures" 2
   assert_contains "$tmp/captures/issue-comment-1.args" "11111111-1111-1111-1111-000000000001"
-  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Engineer-A"
-  assert_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee CEO"
+  assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_B_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$EVALUATOR_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-comment-1.md" "dispatch rework to the PR's author agent"
   assert_contains "$tmp/captures/issue-comment-1.md" "- PR: https://github.com/stone16/sample-repo/pull/12"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Head commit: deadbeef"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: consensus: request-changes"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Engineer verdict (peer lane): request-changes"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Evaluator verdict (adversarial lane): request-changes"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration: 1 of 3"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Rework iteration 1 of 3 for this PR (advisory"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "author-iteration"
   assert_contains "$tmp/captures/issue-comment-1.md" "missing regression test."
   assert_contains "$tmp/captures/issue-comment-1.md" "outbound call has no timeout."
-  assert_contains "$tmp/captures/issue-comment-1.md" "## Rework Protocol"
+  assert_contains "$tmp/captures/issue-comment-1.md" "## Discussion Protocol"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "## Rework Protocol"
   assert_contains "$tmp/captures/issue-comment-1.md" 'Reply to each reviewer finding in this issue with one of: `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`'
-  assert_contains "$tmp/captures/issue-comment-1.md" "Do not @-mention any agent"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "engineer-reviewed:"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "evaluator-reviewed:"
   assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-dispatched: deadbeef -->"
@@ -579,7 +585,7 @@ test_nonapprove_consensus_routes_rework_to_original_author() {
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
-test_iteration_cap_escalates_to_ceo() {
+test_iteration_cap_is_advisory_and_flagged_to_ceo() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-action-items-iter-cap)"
 
@@ -588,8 +594,8 @@ test_iteration_cap_escalates_to_ceo() {
   assert_update_count "$tmp/captures" 1
   assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
-  assert_contains "$tmp/captures/issue-comment-1.md" "iteration cap"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration count: 3 (cap: 3 — reached)"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_B_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Rework iterations so far: 3 (cap: 3 — reached; advisory: escalate to the human instead of dispatching rework)"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
   assert_contains "$tmp/captures/issue-comment-1.md" "## Discussion Protocol"
   assert_contains "$tmp/captures/issue-update-1.args" "--assignee CEO"
@@ -636,11 +642,12 @@ test_prior_prose_sentinels_do_not_inflate_iteration_count() {
   assert_file_count "$tmp/captures" 1
   assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration: 2 of 3"
-  assert_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Rework iteration 2 of 3 for this PR (advisory"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "cap: 3 — reached"
+  assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_B_MENTION_LINK"
 }
 
 test_approve_consensus_closes_existing_review_issue_without_ceo() {
@@ -663,6 +670,8 @@ test_debate_routes_to_ceo_in_pr_review_issue() {
   assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
   assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_B_MENTION_LINK"
   assert_contains "$tmp/captures/issue-update-1.args" "--assignee CEO"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-debate"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: debate"
@@ -743,8 +752,8 @@ test_peer_lane_picks_engineer_b_when_author_is_engineer_a
 test_peer_lane_picks_engineer_a_when_author_is_engineer_b
 test_existing_review_issue_marker_prevents_duplicate_review_request
 test_after_engineer_review_routes_evaluator_in_same_review_issue
-test_nonapprove_consensus_routes_rework_to_original_author
-test_iteration_cap_escalates_to_ceo
+test_nonapprove_consensus_escalates_to_ceo_not_author
+test_iteration_cap_is_advisory_and_flagged_to_ceo
 test_missing_original_author_escalates_to_ceo
 test_unrelated_agent_mentions_do_not_route_rework
 test_prior_prose_sentinels_do_not_inflate_iteration_count

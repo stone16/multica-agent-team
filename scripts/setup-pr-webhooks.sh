@@ -23,10 +23,15 @@
 #     default: without it the script refuses to run rather than enumerate
 #     everything the token can see. Org names stay in env, not in files.
 #
-# Idempotent: existing hooks are listed first, and a target is skipped when
-# a hook already points at the same URL. The comparison is exact string
-# equality held in memory only — neither our URL nor any listed hook URL is
-# ever logged. This script only creates hooks; it never edits or deletes.
+# Idempotent: existing hooks are listed first. A target counts as installed
+# only when a hook points at the same URL AND is active, covers all three
+# events, uses content_type json, and has insecure_ssl "0". A URL match
+# whose config has drifted is repaired in place (PATCH re-asserts the full
+# desired state) instead of being silently skipped. The URL comparison
+# happens inside gh's jq filter against the environment variable, so
+# neither our URL nor any listed hook URL is ever logged or placed on a
+# command line. This script creates and repairs only hooks that point at
+# the Multica webhook URL; it never touches other hooks and never deletes.
 # If the webhook URL is rotated, remove the old hooks manually.
 #
 # Dry-run by default: read-only API calls, then a plan table. --apply writes.
@@ -85,6 +90,26 @@ done
 command -v gh > /dev/null 2>&1 \
   || die "gh CLI not found on PATH. Install it and run 'gh auth login', then re-run."
 
+# `column` is absent from some minimal environments. The summary renders
+# AFTER all writes have happened, so it must never fail the run (a missing
+# binary would exit 127 at the very end — in --apply, after hooks were
+# already created). Detect it once up front and fall back to plain
+# tab-separated output when it is missing or fails.
+HAVE_COLUMN=0
+command -v column > /dev/null 2>&1 && HAVE_COLUMN=1
+
+render_table() { # reads TSV on stdin, writes the formatted table to stderr
+  local tsv
+  tsv="$(cat)"
+  if [[ "$HAVE_COLUMN" -eq 1 ]]; then
+    if printf '%s\n' "$tsv" | column -t -s $'\t' >&2; then
+      return 0
+    fi
+    log "(column failed; printing plain tab-separated output)"
+  fi
+  printf '%s\n' "$tsv" >&2
+}
+
 WEBHOOK_URL="${MULTICA_WEBHOOK_URL:-}"
 if [[ -z "$WEBHOOK_URL" ]]; then
   log "error: MULTICA_WEBHOOK_URL is not set."
@@ -125,6 +150,13 @@ esac
 MASKED_WEBHOOK_URL="$(printf '%s' "$WEBHOOK_URL" \
   | sed -nE 's#^(https?://)([^/?@]*@)?([^/?]+).*#\1\3/<redacted>#p')"
 [[ -n "$MASKED_WEBHOOK_URL" ]] || MASKED_WEBHOOK_URL='<redacted-webhook-url>'
+
+# hook_records compares hook URLs against env.MULTICA_WEBHOOK_URL inside
+# gh's jq filter — the URL stays out of argv and out of every log line.
+# Re-export so the comparison works even when the variable was set without
+# `export` (e.g. via `MULTICA_WEBHOOK_URL=... scripts/...` would export it,
+# but a plain shell assignment would not).
+export MULTICA_WEBHOOK_URL="$WEBHOOK_URL"
 
 # ---------- Scope ----------
 
@@ -181,39 +213,78 @@ list_owner_repos() {
   gh repo list "$1" --limit "$REPO_LIST_LIMIT" --no-archived --json name --jq '.[].name'
 }
 
-# Prints one config.url per existing hook on the target. The output is held
-# in memory for comparison only — hook URLs (ours and any other service's)
-# frequently embed credentials and are never logged.
-hook_targets() {
-  gh api "$1" --paginate --jq '.[] | .config.url // empty' 2> /dev/null
+# Prints one TSV line per existing hook on the target that points at the
+# Multica webhook URL: <id> <active> <events_ok> <content_type_ok> <ssl_ok>
+# (the last four as yes/no). The URL comparison runs inside gh's jq filter
+# against env.MULTICA_WEBHOOK_URL, so hook URLs (ours and any other
+# service's, which frequently embed credentials) never appear in output,
+# logs, or argv. Events are checked by exact membership — jq's `contains`
+# does substring matching on strings, which would let pull_request_review
+# satisfy a pull_request requirement.
+hook_records() {
+  gh api "$1" --paginate --jq '
+    .[]
+    | select((.config.url // "") == env.MULTICA_WEBHOOK_URL)
+    | (.events // []) as $ev
+    | [ (.id | tostring),
+        (if .active == true then "yes" else "no" end),
+        (if (["pull_request", "issue_comment", "pull_request_review"]
+              | map(. as $e | $ev | index($e) != null) | all)
+         then "yes" else "no" end),
+        (if (.config.content_type // "") == "json" then "yes" else "no" end),
+        (if ((.config.insecure_ssl // "") | tostring) == "0" then "yes" else "no" end) ]
+    | @tsv' 2> /dev/null
 }
 
-# 0: a hook already points at the webhook URL; 1: no match; 2: cannot list.
+# Set by hook_state for the drift case (return 3): the hook to PATCH and a
+# human-readable list of what drifted (never contains the URL).
+HOOK_ID=""
+HOOK_DRIFT=""
+
+# 0: a fully configured hook exists (active, all three events, json, ssl
+#    verification on) — nothing to do;
+# 1: no hook points at the webhook URL — create;
+# 2: cannot list hooks — refuse to act blind;
+# 3: URL match but config drifted — update (HOOK_ID / HOOK_DRIFT set).
 hook_state() {
-  local api_path="$1" urls line
-  if ! urls="$(hook_targets "$api_path")"; then
+  local api_path="$1" records id active events_ok ctype_ok ssl_ok drift
+  HOOK_ID=""
+  HOOK_DRIFT=""
+  if ! records="$(hook_records "$api_path")"; then
     return 2
   fi
-  while IFS= read -r line; do
-    [[ "$line" == "$WEBHOOK_URL" ]] && return 0
-  done <<< "$urls"
-  return 1
+  [[ -n "$records" ]] || return 1
+  while IFS=$'\t' read -r id active events_ok ctype_ok ssl_ok; do
+    [[ -n "$id" ]] || continue
+    if [[ "$active" == "yes" && "$events_ok" == "yes" && "$ctype_ok" == "yes" && "$ssl_ok" == "yes" ]]; then
+      # Any fully configured hook wins, even if another URL match drifts.
+      HOOK_ID="$id"
+      HOOK_DRIFT=""
+      return 0
+    fi
+    if [[ -z "$HOOK_ID" ]]; then
+      HOOK_ID="$id"
+      drift=""
+      [[ "$active" == "yes" ]] || drift+="${drift:+, }inactive"
+      [[ "$events_ok" == "yes" ]] || drift+="${drift:+, }events incomplete"
+      [[ "$ctype_ok" == "yes" ]] || drift+="${drift:+, }content_type not json"
+      [[ "$ssl_ok" == "yes" ]] || drift+="${drift:+, }insecure_ssl enabled"
+      HOOK_DRIFT="$drift"
+    fi
+  done <<< "$records"
+  return 3
 }
 
-# Create the webhook at the given API path (orgs/<org>/hooks or
-# repos/<owner>/<repo>/hooks). The request body is fed to gh via stdin
-# (--input -) so the webhook URL — a bearer credential — never appears on a
-# command line, where any local process could read it out of argv via ps.
-# Success stdout (the full hook JSON, which echoes config.url back) is
-# discarded; failure stderr is logged with every occurrence of the webhook
-# URL replaced by its redacted form.
-create_hook() {
-  local api_path="$1" err rc=0 url_json
-  # JSON string escaping: backslash and double-quote are the only characters
-  # in a URL-shaped value that need it, which keeps this dependency-free.
+# Full desired-state body, shared by create (POST) and repair (PATCH) —
+# both re-assert the same state, so drift can never survive an apply.
+# GitHub ignores the extra "name" field on PATCH. JSON string escaping:
+# backslash and double-quote are the only characters in a URL-shaped value
+# that need it, which keeps this dependency-free.
+webhook_payload() {
+  local url_json
   url_json="${WEBHOOK_URL//\\/\\\\}"
   url_json="${url_json//\"/\\\"}"
-  err="$({ gh api "$api_path" --method POST --input - > /dev/null <<EOF
+  cat << EOF
 {
   "name": "web",
   "active": true,
@@ -225,9 +296,34 @@ create_hook() {
   }
 }
 EOF
-  } 2>&1)" || rc=$?
+}
+
+# Create the webhook at the given API path (orgs/<org>/hooks or
+# repos/<owner>/<repo>/hooks). The request body is fed to gh via stdin
+# (--input -) so the webhook URL — a bearer credential — never appears on a
+# command line, where any local process could read it out of argv via ps.
+# Success stdout (the full hook JSON, which echoes config.url back) is
+# discarded; failure stderr is logged with every occurrence of the webhook
+# URL replaced by its redacted form.
+create_hook() {
+  local api_path="$1" err rc=0
+  err="$({ webhook_payload | gh api "$api_path" --method POST --input - > /dev/null; } 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     log "  [warn] hook create failed for $api_path: ${err//"$WEBHOOK_URL"/$MASKED_WEBHOOK_URL}"
+  fi
+  return "$rc"
+}
+
+# Repair a drifted hook in place: PATCH re-asserts the full desired state
+# (active, events, content_type, insecure_ssl — and the URL, which the
+# config object must always carry). Only ever called for a hook that
+# already points at the Multica webhook URL; other services' hooks are
+# never touched. Same stdin + redaction hygiene as create_hook.
+update_hook() {
+  local api_path="$1" hook_id="$2" err rc=0
+  err="$({ webhook_payload | gh api "$api_path/$hook_id" --method PATCH --input - > /dev/null; } 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    log "  [warn] hook update failed for $api_path/$hook_id: ${err//"$WEBHOOK_URL"/$MASKED_WEBHOOK_URL}"
   fi
   return "$rc"
 }
@@ -236,7 +332,9 @@ EOF
 
 SUMMARY_ROWS=()
 CREATED=0
+UPDATED=0
 PLANNED=0
+PLANNED_UPDATES=0
 SKIPPED=0
 WARNED=0
 FAILED=0
@@ -245,7 +343,9 @@ add_row() { # target kind action detail
   SUMMARY_ROWS+=("$(printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4")")
   case "$3" in
     created) CREATED=$((CREATED + 1)) ;;
+    updated) UPDATED=$((UPDATED + 1)) ;;
     would-create) PLANNED=$((PLANNED + 1)) ;;
+    would-update) PLANNED_UPDATES=$((PLANNED_UPDATES + 1)) ;;
     skip) SKIPPED=$((SKIPPED + 1)) ;;
     warn) WARNED=$((WARNED + 1)) ;;
     fail) FAILED=$((FAILED + 1)) ;;
@@ -259,8 +359,8 @@ ensure_hook() { # target api_path kind
   hook_state "$api_path" || rc=$?
   case "$rc" in
     0)
-      log "[$target] a hook already points at the Multica webhook URL — skip"
-      add_row "$target" "$kind" "skip" "hook already installed (config.url match)"
+      log "[$target] hook already installed with the desired config — skip"
+      add_row "$target" "$kind" "skip" "installed (url, active, events, content_type, insecure_ssl all match)"
       ;;
     1)
       if [[ "$APPLY" -eq 1 ]]; then
@@ -273,6 +373,19 @@ ensure_hook() { # target api_path kind
       else
         log "[$target] would create $kind (events: $EVENTS_HUMAN; content_type: json)"
         add_row "$target" "$kind" "would-create" "events: $EVENTS_HUMAN"
+      fi
+      ;;
+    3)
+      if [[ "$APPLY" -eq 1 ]]; then
+        log "[$target] hook points at the Multica webhook URL but config drifted ($HOOK_DRIFT) — repairing"
+        if update_hook "$api_path" "$HOOK_ID"; then
+          add_row "$target" "$kind" "updated" "repaired drift: $HOOK_DRIFT"
+        else
+          add_row "$target" "$kind" "fail" "update rejected (missing admin:org_hook / admin:repo_hook scope?)"
+        fi
+      else
+        log "[$target] hook points at the Multica webhook URL but config drifted ($HOOK_DRIFT) — would update"
+        add_row "$target" "$kind" "would-update" "config drift: $HOOK_DRIFT"
       fi
       ;;
     *)
@@ -342,15 +455,15 @@ if [[ "${#SUMMARY_ROWS[@]}" -gt 0 ]]; then
   {
     printf 'TARGET\tKIND\tACTION\tDETAIL\n'
     printf '%s\n' "${SUMMARY_ROWS[@]}"
-  } | column -t -s $'\t' >&2
+  } | render_table
 fi
 
 log ""
 if [[ "$APPLY" -eq 1 ]]; then
-  log "[summary] created=$CREATED skipped=$SKIPPED warned=$WARNED failed=$FAILED"
+  log "[summary] created=$CREATED updated=$UPDATED skipped=$SKIPPED warned=$WARNED failed=$FAILED"
 else
-  log "[summary] would-create=$PLANNED skipped=$SKIPPED warned=$WARNED failed=$FAILED (dry run)"
-  [[ "$PLANNED" -gt 0 ]] && log "Re-run with --apply to create the hooks above."
+  log "[summary] would-create=$PLANNED would-update=$PLANNED_UPDATES skipped=$SKIPPED warned=$WARNED failed=$FAILED (dry run)"
+  [[ "$((PLANNED + PLANNED_UPDATES))" -gt 0 ]] && log "Re-run with --apply to apply the plan above."
 fi
 
 if [[ "$WARNED" -gt 0 ]]; then

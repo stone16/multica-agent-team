@@ -31,7 +31,7 @@ Seven professions, flat — vertical tiers (Senior/Junior, CTO/Tech Lead) are ab
 | 6 | Evaluator | `agents/evaluator/` | Claude Code / Opus | DoD verification, behavioral testing (happy / expected-failure / weird), adversarial review lane (security, performance, dependency risk, adversarial inputs), weekly eval rollup |
 | 7 | Researcher | `agents/researcher/` | Claude Code / Opus, high effort | Primary-source-grounded research memos: companies, markets, mining projects, quant strategies, regulatory regimes |
 
-The two Engineer instances share the `agents/engineer/` files; which instance an agent is (A or B) is server-side configuration, visible in the agent name. Either instance can take fresh implementation work; rework on an existing PR goes back to its original author; peer review always goes to the non-author instance.
+The two Engineer instances share the `agents/engineer/` files; which instance an agent is (A or B) is server-side configuration, visible in the agent name. Either instance can take fresh implementation work; rework on an existing PR goes back to its original author (always as a CEO dispatch — the sweep script never mentions authors); peer review always goes to the non-author instance.
 
 ## Squad Flow
 
@@ -143,8 +143,8 @@ Both are required; the workflow's first step fails loud if either is missing.
 | Variable | What it is |
 |---|---|
 | `MULTICA_WORKSPACE_ID` | Multica workspace UUID. Required |
-| `CEO_MENTION` | Escalation target, as `[@CEO](mention://agent/<uuid>)`. Required — followups and debates route here |
-| `ENGINEER_A_MENTION`, `ENGINEER_B_MENTION`, `EVALUATOR_MENTION` | Roster mention links in the same form. They map a PR body's `Original author:` UUID to a roster identity — that mapping picks the peer lane and routes rework back to the author. When unset, the peer-lane pick degrades to always dispatching Engineer-A and rework routing falls back to CEO escalation |
+| `CEO_MENTION` | The ONLY mention the sweep ever emits, as `[@CEO](mention://agent/<uuid>)`. Required — every non-approve outcome routes here |
+| `ENGINEER_A_MENTION`, `ENGINEER_B_MENTION`, `EVALUATOR_MENTION` | Roster mention links in the same form. They map a PR body's `Original author:` UUID to a roster identity — that mapping picks the peer lane (the sweep never mentions authors). Required — the workflow's check step FAILS before running the sweep when any of them (or `CEO_MENTION`) is unset |
 | `ENGINEER_A_AGENT`, `ENGINEER_B_AGENT`, `EVALUATOR_AGENT`, `CEO_AGENT` | Multica assignee names; the script defaults to `Engineer-A` / `Engineer-B` / `Evaluator` / `CEO` when unset |
 | `PR_SWEEP_IGNORE` | Newline-separated repo names to exclude from the sweep. Kept as an Actions variable so private repo names never live in tracked files |
 
@@ -180,15 +180,14 @@ Reviewer dispatch is serialized through that single issue: the peer Engineer lan
 
 ### Outcome routing
 
-When both lanes have verdicts, the script reconciles and posts one Multica comment in the PR review issue with the PR URL, head commit, final verdict, both lane verdicts, the matching review bodies (sentinels stripped), and an `Action:` line:
+When both lanes have verdicts, the script reconciles and posts one Multica comment in the PR review issue with the PR URL, head commit, final verdict, both lane verdicts, the matching review bodies (sentinels stripped), and an `Action:` line. **Leader-only routing**: the script never @-mentions PR authors — every non-approve reconciled outcome mentions only `CEO_MENTION`, and the CEO dispatches rework:
 
 | `Action:` value | Recipient | When |
 |---|---|---|
-| `author-iteration` | The PR's original author (from the `Original author:` line) | Both lanes agree on `request-changes` or `block`, and the iteration cap is not reached. The author replies to each finding with `will-fix` / `already-fixed` / `wont-fix` / `needs-discussion` and pushes fixes to the PR branch; the next sweep re-runs both lanes at the new head |
-| `ceo-followup` | `CEO_MENTION` | The iteration cap (`MAX_REVIEW_ITERATIONS`, default 3 distinct non-approve head SHAs) is reached, or the PR body has no `Original author:` line. CEO decides: route the fix, hand off, close, or override |
+| `ceo-followup` | `CEO_MENTION` | Both lanes agree on `request-changes` or `block`. The CEO dispatches rework to the PR's author agent (delegation comment with a DoD referencing the review findings). The outcome comment carries an ADVISORY rework-iteration count ("rework iteration N of `MAX_REVIEW_ITERATIONS`", default cap 3 distinct non-approve head SHAs) — the script no longer enforces the cap; the CEO does, escalating to the human instead of dispatching once the cap is reached. A missing `Original author:` line is noted so the CEO knows the author cannot be identified |
 | `ceo-debate` | `CEO_MENTION` | The lanes disagree. CEO casts the deciding vote in the same issue |
 
-Follow-up is discussion-first, not blind stale-marking: each finding gets a `will-fix` / `already-fixed` / `wont-fix` / `needs-discussion` reply, the thread stays unresolved until the parties agree, and a summary comment lands before resolution. The CEO never implements fixes itself — a `will-fix` from the CEO means a routed dispatch.
+Follow-up is discussion-first, not blind stale-marking: each finding gets a `will-fix` / `already-fixed` / `wont-fix` / `needs-discussion` reply, the thread stays unresolved until the parties agree, and a summary comment lands before resolution. The CEO never implements fixes itself — a `will-fix` from the CEO means a routed dispatch. Rework reaches the author only as a CEO delegation comment; the author then pushes fixes to the PR branch and the next sweep re-runs both lanes at the new head SHA.
 
 If both lanes approve, the script writes the consensus sentinel and marks the review issue `done` without involving the CEO. If the PR is closed or merged before approval, close the review issue manually; the sweep only enumerates open PRs.
 

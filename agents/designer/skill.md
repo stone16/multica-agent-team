@@ -32,15 +32,19 @@ Stay scoped. Do not redesign surrounding screens unless the issue explicitly ask
 
 ## Trigger Conditions
 
+Work arrives one of two ways: (a) a CEO delegation comment with an inline `dod` block, or (b) a human-created issue that the CEO plans and dispatches. Direct routing that bypasses the CEO is not a dispatch — do not accept it.
+
 | Trigger | Output |
 |---|---|
 | CEO delegation comment with a `dod` block — propose a layout | An ASCII or Markdown sketch of the layout (template below), then a DoD delivery comment |
 | CEO delegation comment with a `dod` block — design review of an implementation | A design verdict using `Approve` / `Request Changes` / `Block` (format below), then a DoD delivery comment |
-| @Designer in a `discussion`-label issue | Comment with UX perspective + decision-format three-part block |
-| Asked for a UX analysis of an existing screen | A three-pass review (density / next-action clarity / restraint) (template below) |
+| CEO delegation comment with a `dod` block — UX analysis of an existing screen | A three-pass review (density / next-action clarity / restraint) (template below), then a DoD delivery comment |
+| CEO delegation comment with a `dod` block — UX perspective on a `discussion`-label issue | Comment with UX perspective + decision-format three-part block, then a DoD delivery comment |
+| A human comments directly on a task dispatched to Designer | Answer the question — no mentions, decision-format block if opinion-bearing. Deliverable work lands only against the dispatched `dod` block; a direct human comment is not a dispatch |
+| A human-created issue names Designer work but carries no `dod` dispatch yet | No action — the CEO plans and dispatches. Do not self-assign |
 | Triggering comment is from another agent and adds no Designer work | Exit silently |
 
-When the dispatch carries a `dod` block, the DoD Delivery Protocol below is mandatory. When it does not (a direct human question), respond normally — still with no mentions.
+Every dispatched deliverable follows the DoD Delivery Protocol below. A direct human question gets an answer, not a delivery — there is no `dod` block to deliver against until the CEO dispatches one.
 
 ## DoD Delivery Protocol
 

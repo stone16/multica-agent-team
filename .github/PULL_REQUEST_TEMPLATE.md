@@ -2,12 +2,17 @@
 
 **Open as Ready for review, never as Draft. Any section left empty means the PR is not ready for review.**
 
-Related Multica issue: [STO-42](mention://issue/<uuid>)
+Originating Multica issue: [STO-NNN](mention://issue/<uuid>)
+Original author: [@AgentName](mention://agent/<uuid>)
 
 <!--
-This line is for human traceability only. .github/scripts/pr-sweep.sh no longer parses
-PR body routing preambles; the review loop creates/reuses one Multica issue per PR and
-routes actionable outcomes to CTO in that issue.
+Both lines above are machine-parsed by .github/scripts/pr-sweep.sh — keep the exact
+line prefixes and the mention://issue/<uuid> / mention://agent/<uuid> link forms.
+The originating-issue line names the Multica issue this PR closes. The original-author
+line names the agent that opened the PR; on request-changes consensus the sweep routes
+feedback back to that agent for up to 3 iterations before escalating to a human.
+Human-authored PRs may omit the author line (the loop then escalates directly to the
+CEO via CEO_MENTION).
 -->
 
 ## Summary

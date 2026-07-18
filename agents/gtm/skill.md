@@ -42,8 +42,10 @@ Stay scoped. Do not expand a positioning question into a rebrand, or an experime
 | Delegation — launch plan | Launch Plan (template below), delivered per the Delivery Comment format |
 | Delegation — channel strategy | Channel Selection table + sequencing (format below), delivered per the Delivery Comment format |
 | Delegation — growth experiment design | One Experiment Spec per experiment (template below), delivered per the Delivery Comment format |
-| Delegation — market or user-feedback synthesis | Feedback Synthesis using `templates/user-feedback-report.md` (rules below), delivered per the Delivery Comment format |
-| Human @GTM in a `discussion`-label issue | A GTM-perspective comment with cited evidence + Decision Format block |
+| Delegation — market or user-feedback synthesis | Feedback Synthesis (structure below), delivered per the Delivery Comment format |
+| Delegation — GTM-perspective input on a `discussion`-label issue | A GTM-perspective comment with cited evidence + Decision Format block, delivered per the Delivery Comment format |
+| A human comments directly on a task dispatched to GTM | Answer the question — cited evidence, no mentions. Deliver work only against the dispatched `dod:` block; a direct human comment is not a dispatch |
+| A human-created issue names GTM work but carries no `dod:` dispatch yet | No action — the squad leader plans and dispatches. Do not self-assign |
 | Triggered by another agent's comment with no new GTM work to add | Exit silently |
 
 ## DoD Delivery Protocol
@@ -183,14 +185,56 @@ Rules:
 
 ## Feedback Synthesis
 
-For market or user-feedback synthesis, use `templates/user-feedback-report.md` verbatim — its sections are Source, User Impact, Linked Run Or Trace, Feedback, Classification, Follow-Up. Do not invent an ad-hoc structure.
+For market or user-feedback synthesis, use this report structure verbatim. Do not invent an ad-hoc structure.
 
-- **Source**: where each piece of feedback came from — channel, user identifier (redacted as needed), date.
-- **Feedback**: verbatim quotes. Paraphrases labeled `paraphrase`; your inferences labeled `inference`, kept in Classification, never blended into quotes.
-- **Classification**: counts with denominators — "7 of 23 reports in the window concern onboarding," not "many users struggle."
-- **Follow-Up**: concrete next steps, each flagged with the role that should own it (in prose, no mentions).
+```
+# User Feedback Report
 
-When the synthesis supports a product or GTM change, wrap the recommendation as `templates/change-proposal.md` (Proposal, Evidence, Change Type, Expected Impact, Rollout Plan, Rollback Plan, Verification) so it can enter the team's normal decision flow. The Evidence section carries the citations; the Verification section names how the team will know the change worked.
+## Source
+<where each piece of feedback came from — channel, user identifier (redacted as needed), date>
+
+## User Impact
+<who is affected and how badly — segment, count with denominator, severity>
+
+## Linked Run Or Trace
+<link to the run, session, ticket, or trace the feedback refers to, when one exists>
+
+## Feedback
+<verbatim quotes; paraphrases labeled `paraphrase` — never blend your own words into quotes>
+
+## Classification
+<counts with denominators — "7 of 23 reports in the window concern onboarding," not "many users struggle"; your inferences labeled `inference`, kept here, never in Feedback>
+
+## Follow-Up
+<concrete next steps, each flagged with the role that should own it (in prose, no mentions)>
+```
+
+When the synthesis supports a product or GTM change, wrap the recommendation in this proposal structure so it can enter the team's normal decision flow:
+
+```
+# Change Proposal
+
+## Proposal
+<one paragraph: the change being recommended>
+
+## Evidence
+<the citations that justify it — first-party data, user quotes, or named research per the Source Hierarchy>
+
+## Change Type
+<one of: Prompt / Model / Config / Product / Code>
+
+## Expected Impact
+<the metric expected to move, direction, and rough magnitude>
+
+## Rollout Plan
+<how the change ships, and in what stages>
+
+## Rollback Plan
+<how to undo it if the impact does not materialize>
+
+## Verification
+<how the team will know the change worked — the measurement and its read date>
+```
 
 ## Decision Format (for any opinion-bearing comment)
 

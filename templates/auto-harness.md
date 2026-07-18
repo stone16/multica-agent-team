@@ -1,12 +1,12 @@
 ## Auto-Harness
 
-If you are a Multica code-shipping agent (CTO, Tech Lead, Senior Engineer, Junior Engineer)
+If you are a Multica code-shipping agent (an Engineer instance)
 and you were just assigned an `impl`-label issue, read this BEFORE writing any production
 code. Auto-harness gates large tasks behind a two-stage flow.
 
 ### Stages
 
-- **Stage 1 (Claude Code, local) — done by CEO or CTO in Claude Code, NOT by you.**
+- **Stage 1 (Claude Code, local) — done by an Engineer instance in Claude Code, NOT by you as the assignee.** Contested spec or architecture decisions are adjudicated by the CEO.
   Runs `harness-engineering-skills:harness` to (1) assess whether the change fits the
   current scale and (2) draft logic + checkpoints. Output: `.harness/<task-id>/spec.md`
   inside the target repo's worktree. The spec is *not* committed; it lives on the local
@@ -110,9 +110,9 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
    `#### Acceptance Criteria`, and `#### Verification Commands` verbatim from
    the spec — the child agent gets self-contained context.
 
-   Assignee selection (matches existing Tech Lead Tier Recommendation):
-   - Touches shared infra / new contract / cross-cuts modules → Senior Engineer
-   - Single-module, no new contract → Junior Engineer
+   Assignee selection: every implementation checkpoint goes to an Engineer
+   instance (Engineer-A or Engineer-B — instance-neutral; either takes fresh
+   work). Vertical tiers are abolished; do not route by perceived difficulty.
 
 3. Post the dispatch comment on the parent:
 
@@ -121,8 +121,8 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
 
    Spec: <repo>/.harness/<task-id>/spec.md
    Dispatched checkpoints:
-   - cp-01 → [STO-NNN](mention://issue/<id>) → Senior
-   - cp-02 → [STO-NNN](mention://issue/<id>) → Junior
+   - cp-01 → [STO-NNN](mention://issue/<id>) → Engineer
+   - cp-02 → [STO-NNN](mention://issue/<id>) → Engineer
    - ...
 
    I will re-check this thread after all child issues close.
@@ -140,17 +140,17 @@ multica issue create \
   --title "[harness:e2e] End-to-end verification for <parent title>" \
   --description-stdin \
   --parent <parent-issue-id> \
-  --assignee-id <Senior Engineer (Codex GPT-5.5 mode) UUID>
+  --assignee-id <Engineer instance UUID — either instance>
 multica issue label add <e2e-id> <harness:e2e label-id>
 ```
 
-E2E owner is **Senior Engineer in Codex GPT-5.5 mode only** (not QA — QA reviews
-behavior afterward, but E2E is a Senior responsibility).
+E2E owner is an **Engineer instance** (instance-neutral — not the Evaluator; the
+Evaluator reviews behavior afterward, but E2E is an Engineer responsibility).
 
 The description must instruct the assignee to:
 - Re-run the parent spec's `## Verification` commands holistically.
 - Exercise the user-visible golden path end-to-end.
-- Post evidence per Senior Engineer's `## Verification Matrix` and
+- Post evidence per the Engineer's `## Verification Matrix` and
   `## AI-Aware Engineering` rules.
 
 ### Retro (after E2E child closes)
@@ -196,11 +196,11 @@ filter for sweep / autopilot scripts.
 - Posting the budget table but writing code anyway when something tripped. Bounce.
 - Dispatching checkpoints without `parent_issue_id`. Without it, the audit trail
   breaks.
-- Tagging another agent in any `[auto-harness: ...]` comment. Never. The user
-  routes; you exit silently.
+- Tagging another agent in any `[auto-harness: ...]` comment. Never. Members
+  post comments with no mentions; the CEO routes on re-trigger.
 - Editing `<repo>/.harness/<task-id>/spec.md` from Multica. The spec is Stage 1's
   artifact, not yours. If the spec is wrong, post a `TODO_DECISION:` and bounce
   back to Stage 1 — do not silently rewrite the spec mid-execution.
 - Running E2E inside the parent run instead of dispatching it as a child issue.
-  E2E must be a fresh agent run (anti-drift) and must use the Codex-mode Senior
-  binding.
+  E2E must be a fresh Engineer-instance run (anti-drift), never reused context
+  from the checkpoint runs.

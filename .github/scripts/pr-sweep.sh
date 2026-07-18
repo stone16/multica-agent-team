@@ -13,10 +13,11 @@
 #        - only one lane reviewed → request the other lane in the PR's issue
 #        - neither reviewed → request the peer Engineer first in the PR's issue
 #   4. Create/reuse one Multica issue per PR, keyed by a hidden PR comment
-#   5. Route the reconciled outcome in that same issue: non-approve consensus
-#      goes back to the PR's original author for up to MAX_REVIEW_ITERATIONS
-#      rounds; cap overruns, missing `Original author:` lines, and lane
-#      disagreement escalate to the CEO
+#   5. Route the reconciled outcome in that same issue: EVERY non-approve
+#      outcome (agreed request-changes, agreed block, lane disagreement)
+#      escalates to the CEO. The script never @-mentions PR authors — only
+#      the CEO mentions members (leader-only routing). The rework iteration
+#      count is included as ADVISORY text so the CEO can enforce the cap
 #
 # No LLM is invoked here. Review lanes only run when review work exists.
 
@@ -32,18 +33,22 @@ CEO_AGENT="${CEO_AGENT:-CEO}"
 
 # Mention links in the `[@Name](mention://agent/<uuid>)` form. Operational
 # values live in GitHub Actions variables — never commit agent UUIDs to this
-# repo. CEO_MENTION is the escalation target. The Engineer/Evaluator mentions
-# map the `Original author:` UUID in a PR body to a roster identity; that
-# mapping picks the peer lane and routes rework back to the author.
+# repo. CEO_MENTION is the only mention this script ever emits: all
+# non-approve outcomes route to the CEO, who dispatches rework (leader-only
+# routing per the constitution). The Engineer/Evaluator mentions map the
+# `Original author:` UUID in a PR body to a roster identity; that mapping
+# picks the peer lane only — the script never mentions authors.
 CEO_MENTION="${CEO_MENTION:-@CEO}"
 ENGINEER_A_MENTION="${ENGINEER_A_MENTION:-}"
 ENGINEER_B_MENTION="${ENGINEER_B_MENTION:-}"
 EVALUATOR_MENTION="${EVALUATOR_MENTION:-}"
 
-# Max number of request-changes / block consensus rounds before the loop stops
-# auto-routing rework back to the original author and escalates to CEO_MENTION.
-# Each round = one distinct head SHA that landed a non-approve consensus.
-# Debate (lane disagreement) always escalates regardless of count.
+# Advisory rework cap. The script does not route to authors; every non-approve
+# outcome goes to the CEO. This value only feeds the advisory iteration line in
+# the outcome comment ("rework iteration N of M for this PR") so the CEO can
+# enforce the cap — past it, the CEO escalates to the human instead of
+# dispatching rework. Each round = one distinct head SHA that landed a
+# non-approve consensus.
 MAX_REVIEW_ITERATIONS="${MAX_REVIEW_ITERATIONS:-3}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -148,7 +153,8 @@ has_final_sentinel() {
 }
 
 # Count distinct prior head SHAs that landed a non-approve consensus on this PR.
-# Used to decide whether to keep auto-routing rework to the author or escalate.
+# Feeds the ADVISORY iteration line in the CEO outcome comment; the CEO uses it
+# to decide between dispatching rework and escalating to the human.
 # Reads PR comments (stateless across sweep runs by design — sentinels persist
 # in the PR thread, so the counter survives without any external state store).
 #
@@ -181,8 +187,8 @@ mention_agent_uuid() {
 # whitespace) so that an unrelated agent mention elsewhere in the body —
 # a thank-you, a CC list, a quoted escalation — does not get treated as
 # the author. Returns empty if the line is absent or carries no agent
-# mention; callers fall back to the Engineer-A peer default and to CEO
-# escalation for rework routing.
+# mention; callers fall back to the Engineer-A peer default, and the CEO
+# outcome comment notes that the author could not be identified.
 original_author_id_from_body() {
   local body="$1"
   # `|| true`: grep exits 1 when the line is absent (human-authored PRs);
@@ -205,36 +211,6 @@ peer_engineer_for_author() {
     printf '%s' "$ENGINEER_B_AGENT"
   else
     printf '%s' "$ENGINEER_A_AGENT"
-  fi
-}
-
-# Map an author UUID to a Multica assignee name via the configured mention
-# links. Empty when the UUID matches no configured roster identity.
-agent_name_for_uuid() {
-  local uuid="$1"
-  [[ -n "$uuid" ]] || return 0
-  if [[ "$uuid" == "$(mention_agent_uuid "$ENGINEER_A_MENTION")" ]]; then
-    printf '%s' "$ENGINEER_A_AGENT"
-  elif [[ "$uuid" == "$(mention_agent_uuid "$ENGINEER_B_MENTION")" ]]; then
-    printf '%s' "$ENGINEER_B_AGENT"
-  elif [[ "$uuid" == "$(mention_agent_uuid "$EVALUATOR_MENTION")" ]]; then
-    printf '%s' "$EVALUATOR_AGENT"
-  fi
-}
-
-# Render the mention link for an author UUID: the configured mention when the
-# UUID maps to a roster identity, else a generic link (Multica renders the
-# canonical name regardless of the label).
-author_mention_for_uuid() {
-  local uuid="$1"
-  if [[ "$uuid" == "$(mention_agent_uuid "$ENGINEER_A_MENTION")" ]]; then
-    printf '%s' "$ENGINEER_A_MENTION"
-  elif [[ "$uuid" == "$(mention_agent_uuid "$ENGINEER_B_MENTION")" ]]; then
-    printf '%s' "$ENGINEER_B_MENTION"
-  elif [[ "$uuid" == "$(mention_agent_uuid "$EVALUATOR_MENTION")" ]]; then
-    printf '%s' "$EVALUATOR_MENTION"
-  else
-    printf '[@author](mention://agent/%s)' "$uuid"
   fi
 }
 
@@ -308,7 +284,7 @@ This is the single Multica thread for this PR review.
 PR: $(review_queue_item "$repo" "$num" "$sha")
 Idempotency key: $(pr_url "$repo" "$num")
 
-The sweep reuses this issue for every head SHA on this PR. New pushes append a new review request comment; older review comments are stale when their SHA differs. The issue is marked \`done\` when both lanes approve. On a non-approve consensus the sweep routes rework to the PR's original author in this issue for up to $MAX_REVIEW_ITERATIONS iterations; when the cap is reached, the \`Original author:\` line is missing, or the lanes disagree, the sweep escalates to the CEO here.
+The sweep reuses this issue for every head SHA on this PR. New pushes append a new review request comment; older review comments are stale when their SHA differs. The issue is marked \`done\` when both lanes approve. Every non-approve outcome — agreed request-changes, agreed block, or lane disagreement — is escalated to the CEO in this issue; the sweep never @-mentions the PR's author. The CEO dispatches rework, honoring the advisory rework-iteration count in the outcome comment (past $MAX_REVIEW_ITERATIONS iterations, the CEO escalates to the human instead of dispatching).
 
 PRs to review (format: clickable \`owner/repo#num\` plus \`@\` head SHA - the SHA shows the head when this request was assembled):
 
@@ -415,33 +391,27 @@ review_comment_body() {
 
 post_review_outcome_comment() {
   local issue_id="$1" repo="$2" num="$3" sha="$4" outcome="$5" engineer="$6" evaluator="$7"
-  local action_kind="$8" reason="$9" recipient="${10}" iter="${11}"
+  local action_kind="$8" reason="$9" iter="${10}"
   local link marker engineer_body evaluator_body comment header iter_line protocol
   link="$(pr_url "$repo" "$num")"
   marker="$(review_outcome_marker "$sha")"
   engineer_body="$(review_comment_body "$repo" "$num" "engineer-reviewed" "$sha")"
   evaluator_body="$(review_comment_body "$repo" "$num" "evaluator-reviewed" "$sha")"
 
+  # Leader-only routing: every header below mentions ONLY the CEO. The script
+  # never @-mentions PR authors; the CEO dispatches rework. The iteration line
+  # is advisory — it lets the CEO enforce MAX_REVIEW_ITERATIONS.
   case "$action_kind" in
-    author-iteration)
-      header="$recipient PR review came back with \`$outcome\`. Please address the findings below by pushing a new commit to the PR branch; the next sweep picks up the new head SHA and re-runs both review lanes automatically."
-      iter_line="- Iteration: $((iter + 1)) of $MAX_REVIEW_ITERATIONS (when the cap is reached, the loop stops auto-routing and escalates to the CEO)"
-      protocol=$(cat <<'PROTO'
-## Rework Protocol
-
-Reply to each reviewer finding in this issue with one of: `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`, then push the fixes as new commits on the PR branch.
-Do not @-mention any agent; the sweep re-runs both review lanes against the new head SHA automatically.
-If a finding should not change, say why and mark it `wont-fix`; disagreement that survives rework escalates to the CEO.
-PROTO
-)
-      ;;
     ceo-followup)
-      if [[ "$reason" == "iteration-cap" ]]; then
-        header="$CEO_MENTION PR review loop hit the iteration cap ($MAX_REVIEW_ITERATIONS rounds of \`request-changes\` / \`block\` consensus). Auto-routing to the original author has stopped — please decide in this issue whether to fix, hand off, close, or override."
-        iter_line="- Iteration count: $iter (cap: $MAX_REVIEW_ITERATIONS — reached)"
+      if [[ "$reason" == "missing-author" ]]; then
+        header="$CEO_MENTION PR review came back with \`$outcome\`, and the PR body has no \`Original author: [@AgentName](mention://agent/<uuid>)\` line, so the author agent cannot be identified. Please handle the follow-up in this issue: identify an owner and dispatch rework with a DoD referencing the findings below, or hand off, close, or override."
       else
-        header="$CEO_MENTION PR review came back with \`$outcome\`, but the PR body has no \`Original author: [@AgentName](mention://agent/<uuid>)\` line, so the loop cannot route rework to an agent. Please handle the follow-up in this issue by deciding whether to fix, hand off, close, or override."
-        iter_line=""
+        header="$CEO_MENTION PR review came back with \`$outcome\`. Please dispatch rework to the PR's author agent with a DoD referencing the findings below, or hand off, close, or override. The sweep does not route to authors; routing is yours."
+      fi
+      if (( iter >= MAX_REVIEW_ITERATIONS )); then
+        iter_line="- Rework iterations so far: $iter (cap: $MAX_REVIEW_ITERATIONS — reached; advisory: escalate to the human instead of dispatching rework)"
+      else
+        iter_line="- Rework iteration $((iter + 1)) of $MAX_REVIEW_ITERATIONS for this PR (advisory — the CEO enforces the cap; past it, escalate to the human)"
       fi
       protocol=$(cat <<'PROTO'
 ## Discussion Protocol
@@ -543,7 +513,7 @@ You are reviewing $lane_desc. Follow the instructions in this issue description.
 <!-- ${lane}-reviewed: <head-sha> verdict: <approve|request-changes|block> -->
 \`\`\`
 
-After posting the PR review, add a one-line summary here and set this issue to \`in_review\`. Do not @-mention another agent; the sweep will move this same issue to the other lane, the original author, or the CEO.
+After posting the PR review, add a one-line summary here and set this issue to \`in_review\`. Do not @-mention another agent; the sweep will move this same issue to the other lane or, on any non-approve outcome, to the CEO.
 
 $marker
 EOF
@@ -559,14 +529,13 @@ EOF
 
 dispatch_review_outcome() {
   local repo="$1" num="$2" sha="$3" outcome="$4" engineer="$5" evaluator="$6"
-  local action_kind="$7" reason="$8" recipient="$9" assignee="${10}" iter="${11}" comments="${12}"
-  local issue_id marker create_assignee
+  local action_kind="$7" reason="$8" iter="$9" comments="${10}"
+  local issue_id marker
   marker="$(review_outcome_marker "$sha")"
-  # When the author UUID maps to no configured roster identity, we can still
-  # ping via the mention link but cannot reassign; the CEO owns the issue then.
-  create_assignee="${assignee:-$CEO_AGENT}"
+  # Every non-approve outcome is owned by the CEO — the script never assigns
+  # or mentions the PR's author; the CEO dispatches rework from here.
 
-  if ! issue_id="$(ensure_review_issue "$repo" "$num" "$sha" "$comments" "$create_assignee")"; then
+  if ! issue_id="$(ensure_review_issue "$repo" "$num" "$sha" "$comments" "$CEO_AGENT")"; then
     log "    [warn] ensure_review_issue failed for $GH_OWNER/$repo#$num"
     return 1
   fi
@@ -575,11 +544,11 @@ dispatch_review_outcome() {
     return 0
   fi
 
-  if ! post_review_outcome_comment "$issue_id" "$repo" "$num" "$sha" "$outcome" "$engineer" "$evaluator" "$action_kind" "$reason" "$recipient" "$iter"; then
+  if ! post_review_outcome_comment "$issue_id" "$repo" "$num" "$sha" "$outcome" "$engineer" "$evaluator" "$action_kind" "$reason" "$iter"; then
     return 1
   fi
 
-  if ! multica issue update "$issue_id" --status in_progress --assignee "$create_assignee" >/dev/null 2>&1; then
+  if ! multica issue update "$issue_id" --status in_progress --assignee "$CEO_AGENT" >/dev/null 2>&1; then
     log "    [warn] review issue update failed for $issue_id (continuing)"
   fi
   return 0
@@ -600,12 +569,12 @@ close_review_issue_if_known() {
 
 # ---------- Consensus ----------
 
-# Routing matrix for a finalized review:
-#   lanes disagree                    → ceo-debate (CEO casts the deciding vote)
-#   non-approve, author line missing  → ceo-followup (no agent to route rework to)
-#   non-approve, iter >= cap          → ceo-followup (iteration cap reached)
-#   non-approve, iter <  cap          → author-iteration (rework to original author)
-#   approve + approve                 → close the PR's review issue
+# Routing matrix for a finalized review (leader-only routing — the script
+# mentions ONLY the CEO; the CEO dispatches any rework):
+#   lanes disagree        → ceo-debate (CEO casts the deciding vote)
+#   non-approve consensus → ceo-followup (CEO dispatches rework; the advisory
+#                           iteration line lets the CEO enforce the cap)
+#   approve + approve     → close the PR's review issue
 write_consensus() {
   local repo="$1" num="$2" sha="$3" engineer="$4" evaluator="$5" comments="${6:-}" author_uuid="${7:-}"
   [[ -n "$comments" ]] || comments="$(pr_comments_body "$repo" "$num")"
@@ -614,28 +583,14 @@ write_consensus() {
     if [[ "$engineer" == "approve" ]]; then
       close_review_issue_if_known "$repo" "$num" "$sha" "$comments"
     else
-      local iter action_kind reason recipient assignee
+      local iter reason
       iter="$(iteration_count "$comments")"
       : "${iter:=0}"
 
-      if [[ -z "$author_uuid" ]]; then
-        action_kind="ceo-followup"
-        reason="missing-author"
-        recipient="$CEO_MENTION"
-        assignee="$CEO_AGENT"
-      elif (( iter >= MAX_REVIEW_ITERATIONS )); then
-        action_kind="ceo-followup"
-        reason="iteration-cap"
-        recipient="$CEO_MENTION"
-        assignee="$CEO_AGENT"
-      else
-        action_kind="author-iteration"
-        reason=""
-        recipient="$(author_mention_for_uuid "$author_uuid")"
-        assignee="$(agent_name_for_uuid "$author_uuid")"
-      fi
+      reason=""
+      [[ -z "$author_uuid" ]] && reason="missing-author"
 
-      if ! dispatch_review_outcome "$repo" "$num" "$sha" "consensus: $engineer" "$engineer" "$evaluator" "$action_kind" "$reason" "$recipient" "$assignee" "$iter" "$comments"; then
+      if ! dispatch_review_outcome "$repo" "$num" "$sha" "consensus: $engineer" "$engineer" "$evaluator" "ceo-followup" "$reason" "$iter" "$comments"; then
         log "    [warn] review issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
         return 0
       fi
@@ -649,7 +604,7 @@ write_consensus() {
       log "    [warn] consensus comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
     fi
   else
-    if ! dispatch_review_outcome "$repo" "$num" "$sha" "debate" "$engineer" "$evaluator" "ceo-debate" "" "$CEO_MENTION" "$CEO_AGENT" 0 "$comments"; then
+    if ! dispatch_review_outcome "$repo" "$num" "$sha" "debate" "$engineer" "$evaluator" "ceo-debate" "" 0 "$comments"; then
       log "    [warn] review issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
       return 0
     fi

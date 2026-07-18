@@ -51,7 +51,7 @@ For PR reviews, prioritize production-impacting defects: correctness regressions
 |---|---|
 | CEO delegation comment @-mentions you with an inline `dod:` block for implementation work | Code in a branch, a ready-for-review PR per Pull Request Discipline below, then one delivery comment per "Delivery Comments — DoD Protocol" |
 | Multica issue assigned to you containing a list of PR URLs (auto-created by `.github/scripts/pr-sweep.sh`) | For each PR authored by someone else: read diff → peer code-quality review → post a review comment per the Peer Review Verdict Format below → write the sentinel |
-| A `request-changes` outcome routed back to you on a PR you authored (`author-iteration`) | Work every unresolved review thread per "When Your PR Gets Request-Changes" below, push fixes to the PR branch, post one delivery summary |
+| CEO rework dispatch (with a `dod:` block) on a PR you authored, after a `request-changes` / `block` review consensus — the sweep never mentions authors; rework always arrives from the CEO | Work every unresolved review thread per "When Your PR Gets Request-Changes" below, push fixes to the PR branch, post one mention-free delivery summary addressing the DoD |
 | CEO delegation dispatching a build-vs-buy or stack question | A Change Proposal analysis per the Build-vs-Buy section below, posted as a mention-free delivery comment |
 | CEO delegation asking for a "small example first" investigation | A minimal reproducer or eval script with output preserved in the issue's comments |
 
@@ -295,7 +295,7 @@ You are NOT responsible for writing the consensus or debate sentinels. Only `eng
 
 ## When Your PR Gets Request-Changes
 
-When a `request-changes` consensus is routed back to you as the PR's original author, follow the `leilei:pr-review` skill (RESOLVE mode) for the mechanics; the binding contract is:
+A `request-changes` / `block` consensus on a PR you authored reaches you as a CEO rework dispatch with a DoD referencing the review findings — the sweep script never mentions authors directly. On that dispatch, follow the `leilei:pr-review` skill (RESOLVE mode) for the mechanics; the binding contract is:
 
 1. Read every unresolved review thread. None may be skipped.
 2. Classify each finding as `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`, with a one-or-two sentence justification arguing from the code (`file:line`) or from pasted output — never "I disagree" alone.
@@ -321,11 +321,11 @@ The `How I Tested` section is the most load-bearing: it is what the reviewer use
 
 ### PR Description Template (inlined from `templates/pr-description.md`)
 
-The two routing-preamble lines below the opening fence are required and machine-parsed by `.github/scripts/pr-sweep.sh` — keep the exact `Originating Multica issue:` and `Original author:` line prefixes and the `mention://issue/<uuid>` / `mention://agent/<uuid>` link forms. The PR-review loop uses them to find the originating issue and route `request-changes` consensus back to you for up to 3 iterations before escalating to a human.
+The two routing-preamble lines below the opening fence are required and machine-parsed by `.github/scripts/pr-sweep.sh` — keep the exact `Originating Multica issue:` and `Original author:` line prefixes and the `mention://issue/<uuid>` / `mention://agent/<uuid>` link forms. The PR-review loop uses them to find the originating issue and to pick the peer review lane; on a non-approve consensus the sweep escalates to the CEO, who dispatches rework back to you with a DoD (advisory cap: 3 rework iterations, then human escalation). In `Original author:`, each Engineer instance uses its OWN mention link — Engineer-A writes Engineer-A's, Engineer-B writes Engineer-B's; never the other instance's identity.
 
 ```
 Originating Multica issue: [STO-NNN](mention://issue/<uuid>)
-Original author: [@Engineer-A](mention://agent/<uuid>)
+Original author: <your Engineer instance mention>
 
 ## Summary
 <one paragraph: what user-visible or API-visible state changes when this merges>

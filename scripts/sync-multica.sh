@@ -82,6 +82,26 @@ command -v multica > /dev/null 2>&1 \
 command -v python3 > /dev/null 2>&1 \
   || die "python3 not found on PATH (required for JSON parsing)."
 
+# `column` is absent from some minimal environments. The summary renders
+# AFTER all writes have happened, so it must never fail the run (a missing
+# binary would exit 127 at the very end — in --apply, after server updates
+# already landed). Detect it once up front and fall back to plain
+# tab-separated output when it is missing or fails.
+HAVE_COLUMN=0
+command -v column > /dev/null 2>&1 && HAVE_COLUMN=1
+
+render_table() { # reads TSV on stdin, writes the formatted table to stderr
+  local tsv
+  tsv="$(cat)"
+  if [[ "$HAVE_COLUMN" -eq 1 ]]; then
+    if printf '%s\n' "$tsv" | column -t -s $'\t' >&2; then
+      return 0
+    fi
+    log "(column failed; printing plain tab-separated output)"
+  fi
+  printf '%s\n' "$tsv" >&2
+}
+
 [[ -d agents ]] || die "no agents/ directory at $REPO_ROOT — run from the agent-team checkout."
 
 WORK_DIR="$(mktemp -d)"
@@ -363,7 +383,7 @@ log "Summary:"
 {
   printf 'ROLE\tRESOURCE\tTARGET\tSTATUS\n'
   printf '%s\n' "${SUMMARY_ROWS[@]}"
-} | column -t -s $'\t' >&2
+} | render_table
 
 if [[ "$ERRORS" -gt 0 ]]; then
   log ""
