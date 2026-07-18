@@ -215,13 +215,36 @@ review_queue_item() {
 
 # ---------- Sentinel parsing ----------
 
-# Returns the verdict word if a sentinel matching
-# <!-- <name>: <sha> verdict: <v> --> exists in the body, else empty.
+# Positional discipline shared by every sentinel/marker parser below: a
+# sweep-protocol sentinel or marker only counts when its line is STANDALONE —
+# the line consists solely of the `<!-- ... -->` HTML comment, optionally
+# surrounded by whitespace — AND that line sits outside any fenced code
+# block. A trusted reviewer QUOTING a full sentinel or marker line inside a
+# ``` fence (e.g. as evidence of a malicious PR's content) or mid-sentence
+# must never converge a review, open a debate, resolve one, inflate the
+# iteration counter, or redirect the review thread. Fence state is a simple
+# per-line toggle over ```/~~~ fence lines; an unbalanced fence fails CLOSED
+# (subsequent lines are treated as fenced and ignored — quoting can suppress
+# sweep state, never forge it). All sweep-authored writes already emit the
+# compliant form: every sentinel goes out on its own line, and the
+# `multica-pr-review-issue` marker is posted as the entire comment body.
+unfenced_lines() {
+  awk '
+    /^[[:space:]]*(```|~~~)/ { in_fence = !in_fence; next }
+    !in_fence { print }
+  '
+}
+
+# Returns the verdict word if a STANDALONE sentinel line
+# <!-- <name>: <sha> verdict: <v> --> exists in the body outside any fenced
+# code block, else empty.
 # The regex requires the literal HTML-comment delimiters `<!--` and `-->`
-# (same hardening as iteration_count below) so that prose merely QUOTING a
-# sentinel — e.g. a backticked `ceo-resolved: <sha> verdict: approve` in a
-# discussion or postmortem comment — can never converge a debate or alter
-# sweep behavior. Only actual sentinels posted as HTML comments count.
+# AND is anchored to the whole line (same hardening as iteration_count
+# below) so that prose merely QUOTING a sentinel — e.g. a backticked
+# `ceo-resolved: <sha> verdict: approve` in a discussion comment, or a full
+# sentinel line reproduced inside a fenced block as evidence — can never
+# converge a debate or alter sweep behavior. Only actual sentinels posted as
+# standalone HTML-comment lines count.
 sentinel_verdict() {
   local body="$1" name="$2" sha="$3"
   # Pipeline returns 1 when grep finds no sentinel — that's the common
@@ -231,8 +254,9 @@ sentinel_verdict() {
   # The verdict class is a strict whitelist — a sentinel carrying anything
   # other than approve|request-changes|block is malformed and is NOT a
   # sentinel (e.g. `approved` never matches).
-  printf '%s' "$body" \
-    | grep -oE "<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*(approve|request-changes|block)[[:space:]]*-->" \
+  printf '%s\n' "$body" \
+    | unfenced_lines \
+    | grep -oE "^[[:space:]]*<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*(approve|request-changes|block)[[:space:]]*-->[[:space:]]*$" \
     | tail -1 \
     | sed -E "s/.*verdict:[[:space:]]*(approve|request-changes|block).*/\1/" \
     || true
@@ -240,13 +264,17 @@ sentinel_verdict() {
 
 # Only the consensus sentinel is terminal for a SHA.
 # Requires the full delimited form emitted by write-time code
-# (`<!-- consensus: <sha> verdict: <v> -->`) so quoted prose cannot match.
+# (`<!-- consensus: <sha> verdict: <v> -->`) as a STANDALONE line outside
+# any fenced code block, so quoted prose cannot match.
 has_consensus_sentinel() {
-  local body="$1" sha="$2"
+  local body="$1" sha="$2" n
   # Same strict verdict whitelist as sentinel_verdict: a malformed verdict is
-  # not a consensus sentinel.
-  printf '%s' "$body" \
-    | grep -qE "<!--[[:space:]]*consensus:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*(approve|request-changes|block)[[:space:]]*-->"
+  # not a consensus sentinel. grep -c reads all input (no early -q exit), so
+  # pipefail can never misreport a found sentinel as absent.
+  n=$(printf '%s\n' "$body" \
+    | unfenced_lines \
+    | grep -cE "^[[:space:]]*<!--[[:space:]]*consensus:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*(approve|request-changes|block)[[:space:]]*-->[[:space:]]*$") || true
+  [[ "${n:-0}" -gt 0 ]]
 }
 
 # The debate sentinel is NOT terminal: it means the lanes disagreed and the
@@ -256,23 +284,28 @@ has_consensus_sentinel() {
 # debate + ceo-resolved at the SAME SHA → the sweep writes the final consensus
 # sentinel with the resolved verdict. debate without ceo-resolved → the sweep
 # logs "waiting for CEO adjudication" and skips (never treats it as final).
-# Requires the full delimited form (`<!-- debate: <sha> -->`) so quoted
-# prose cannot match.
+# Requires the full delimited form (`<!-- debate: <sha> -->`) as a
+# STANDALONE line outside any fenced code block, so quoted prose cannot
+# match.
 has_debate_sentinel() {
-  local body="$1" sha="$2"
-  printf '%s' "$body" \
-    | grep -qE "<!--[[:space:]]*debate:[[:space:]]*${sha}[[:space:]]*-->"
+  local body="$1" sha="$2" n
+  n=$(printf '%s\n' "$body" \
+    | unfenced_lines \
+    | grep -cE "^[[:space:]]*<!--[[:space:]]*debate:[[:space:]]*${sha}[[:space:]]*-->[[:space:]]*$") || true
+  [[ "${n:-0}" -gt 0 ]]
 }
 
 # All verdicts for a lane sentinel at this SHA, one per line, in thread order.
 # Used for Evaluator-authored PRs, where BOTH lanes write `engineer-reviewed`
 # sentinels in two distinct review comments (first = peer, second =
-# adversarial checklist). Requires the `<!-- -->` delimiters, same as
-# sentinel_verdict, so quoted prose cannot inject verdicts.
+# adversarial checklist). Requires the `<!-- -->` delimiters on a STANDALONE
+# unfenced line, same as sentinel_verdict, so quoted prose cannot inject
+# verdicts.
 sentinel_verdicts_all() {
   local body="$1" name="$2" sha="$3"
-  printf '%s' "$body" \
-    | grep -oE "<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*(approve|request-changes|block)[[:space:]]*-->" \
+  printf '%s\n' "$body" \
+    | unfenced_lines \
+    | grep -oE "^[[:space:]]*<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*(approve|request-changes|block)[[:space:]]*-->[[:space:]]*$" \
     | sed -E "s/.*verdict:[[:space:]]*(approve|request-changes|block).*/\1/" \
     || true
 }
@@ -318,15 +351,17 @@ lane_verdict_from_comments() {
 # Reads PR comments (stateless across sweep runs by design — sentinels persist
 # in the PR thread, so the counter survives without any external state store).
 #
-# The regex requires the literal HTML-comment delimiters `<!--` and `-->` so
-# that prose discussing prior verdicts (e.g. quoted sentinels in a postmortem
-# comment, or an excerpt of an earlier sweep notification) does not inflate
-# the counter and trigger a premature CEO escalation. Only actual sentinels
-# emitted by `write_consensus()` count.
+# The regex requires the literal HTML-comment delimiters `<!--` and `-->` on
+# a STANDALONE line outside any fenced code block, so that prose discussing
+# prior verdicts (e.g. quoted sentinels in a postmortem comment, a fenced
+# excerpt of an earlier sweep notification, or a sentinel pasted
+# mid-sentence) does not inflate the counter and trigger a premature CEO
+# escalation. Only actual sentinels emitted by `write_consensus()` count.
 iteration_count() {
   local body="$1"
-  printf '%s' "$body" \
-    | grep -oE '<!--[[:space:]]*consensus:[[:space:]]*[a-f0-9]+[[:space:]]+verdict:[[:space:]]*(request-changes|block)[[:space:]]*-->' \
+  printf '%s\n' "$body" \
+    | unfenced_lines \
+    | grep -oE '^[[:space:]]*<!--[[:space:]]*consensus:[[:space:]]*[a-f0-9]+[[:space:]]+verdict:[[:space:]]*(request-changes|block)[[:space:]]*-->[[:space:]]*$' \
     | awk '{print $3}' \
     | sort -u \
     | grep -c . \
@@ -455,10 +490,17 @@ review_issue_marker() {
 # `<!-- multica-pr-review-issue: id -->` marker in an arbitrary commenter's
 # comment must never redirect review dispatch, assignment, or status updates
 # to another Multica issue.
+# Positional discipline: the marker only counts on a STANDALONE line — the
+# line consists solely of the marker, optionally surrounded by whitespace —
+# outside any fenced code block. The sweep's own marker comment is the
+# marker as the ENTIRE comment body (see create_review_issue), which always
+# satisfies this; a trusted reviewer quoting a marker line inside a fence or
+# mid-sentence never does.
 review_issue_id_from_comments() {
   local comments="$1"
   printf '%s\n' "$comments" \
-    | sed -nE 's/.*<!--[[:space:]]*multica-pr-review-issue:[[:space:]]*([^[:space:]<>]+)[[:space:]]*-->.*/\1/p' \
+    | unfenced_lines \
+    | sed -nE 's/^[[:space:]]*<!--[[:space:]]*multica-pr-review-issue:[[:space:]]*([^[:space:]<>]+)[[:space:]]*-->[[:space:]]*$/\1/p' \
     | tail -1
 }
 
@@ -683,16 +725,23 @@ review_comment_body() {
 # letter case, followed by either a literal `:` or ANY entity-like sequence
 # (`&` + one or more chars of [#a-zA-Z0-9] + `;` — unbounded, so an
 # arbitrarily zero-padded payload like `&#00000000058;` cannot outgrow the
-# match), then `//`, is collapsed to the
-# single inert form `mention[:]//`. Anything that could decode into a colon
-# at Markdown render time is rewritten before it gets the chance;
-# already-neutralized `mention[:]//` does not match, so the rewrite is
+# match), then the two slashes, is collapsed to the
+# single inert form `mention[:]//`. The SLASHES get the same generic
+# treatment as the colon: each of the two post-colon slashes may
+# independently arrive as a literal `/` or as ANY entity-like `&…;`
+# sequence (`&#47;`, `&#x2F;`, `&sol;`, zero-padded variants, …) —
+# requiring literal `//` would let `mention&#58;&#47;&#47;` (or the mixed
+# `mention&#58;/&#47;`) skip the rewrite entirely and decode to a live URI
+# at render time. Anything that could decode into a colon or slash at
+# Markdown render time is rewritten before it gets the chance;
+# already-neutralized `mention[:]//` does not match (the `[` after the
+# scheme name is neither a colon nor an entity), so the rewrite is
 # idempotent. macOS sed lacks a case-insensitive flag, hence the explicit
 # per-letter case classes. Leader-only routing depends on this — the CEO's
 # own routing mention lives in the script-authored header, never inside
 # neutralized content.
 neutralize_mentions() {
-  sed -E 's@[Mm][Ee][Nn][Tt][Ii][Oo][Nn](:|&[#a-zA-Z0-9]+;)//@mention[:]//@g'
+  sed -E 's@[Mm][Ee][Nn][Tt][Ii][Oo][Nn](:|&[#a-zA-Z0-9]+;)(/|&[#a-zA-Z0-9]+;)(/|&[#a-zA-Z0-9]+;)@mention[:]//@g'
 }
 
 post_review_outcome_comment() {
@@ -742,9 +791,25 @@ post_review_outcome_comment() {
 
   # Author identity for the CEO's rework dispatch. The mention markdown is
   # wrapped in backticks so this line stays informational — the sweep never
-  # emits a live mention of the author (leader-only routing).
+  # emits a live mention of the author (leader-only routing). A backtick
+  # INSIDE the extracted markdown would close that code span early and could
+  # re-expose a live mention scheme outside it, so backtick-carrying
+  # extractions are never embedded raw: the line falls back to a fixed
+  # neutralized form rebuilt from parts the script already validated — the
+  # display name (backticks stripped, mention schemes defanged) and the
+  # single agent UUID — with the URI scheme inert (`mention[:]//`).
   if [[ -n "$author_mention" ]]; then
-    author_line="- Original author: \`${author_mention}\` (backticked — informational, not a live mention; rework routing stays with the CEO)"
+    if [[ "$author_mention" == *'`'* ]]; then
+      local author_name author_uuid_info
+      author_name="$(printf '%s' "$author_mention" \
+        | sed -nE 's/^\[@([^]]*)\].*/\1/p' \
+        | tr -d '`' \
+        | neutralize_mentions)"
+      author_uuid_info="$(mention_agent_uuid "$author_mention")"
+      author_line="- Original author: @${author_name} (mention[:]//agent/${author_uuid_info}) (neutralized — extracted label carried a backtick; informational, not a live mention; rework routing stays with the CEO)"
+    else
+      author_line="- Original author: \`${author_mention}\` (backticked — informational, not a live mention; rework routing stays with the CEO)"
+    fi
   else
     author_line="- Original author: unknown (human-authored or preamble unparseable) — no agent rework target; treat as human-owned"
   fi

@@ -140,7 +140,7 @@ No further dispatches on this step until you direct one.
 Re-triggered by a delivery comment containing `[auto-harness: checkpoint-plan]` or `[auto-harness: e2e-plan]` — an Engineer has proposed child issues; creating and dispatching them is your move, per the cost rule.
 
 1. Validate every proposed child carries all four suggested DoD fields: `outcome`, `evidence`, `verification`, `max_rounds`. Any entry missing a field, or a plan with zero entries, is malformed → rework dispatch back to the proposing Engineer naming the missing fields; this counts against that step's `max_rounds`. Do not create any children from a malformed plan.
-2. For a valid plan, create ONE child issue per entry (`multica issue create` with the entry's title and self-contained body, parented to the triggering issue), assigned to an Engineer instance — instance-neutral; either takes fresh work.
+2. For a valid plan, create ONE child issue per entry (`multica issue create` with the entry's title and self-contained body, parented to the triggering issue), assigned to an Engineer instance — instance-neutral; either takes fresh work. Label every child at creation — `harness:cp` for each checkpoint-plan child, `harness:e2e` for the e2e-plan child — creating the label in the workspace first if it does not exist yet. Step 6 selects checkpoint children BY the `harness:cp` label, so an unlabeled child is invisible to the E2E hand-off and stalls the parent permanently.
 3. Dispatch each child with a delegation comment carrying an inline `dod:` block per the DoD Dispatch Protocol above. The plan's suggested DoD fields are advisory — you may tighten them, but no child is dispatched without a complete block.
 4. Post one comment on the parent issue:
 
