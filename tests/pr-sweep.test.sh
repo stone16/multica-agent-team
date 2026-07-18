@@ -4,6 +4,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/.github/scripts/pr-sweep.sh"
 
+# Fake roster identity used across the suite. UUIDs are test fixtures only.
+ENGINEER_A_UUID="aaaaaaaa-0000-0000-0000-000000000001"
+ENGINEER_B_UUID="bbbbbbbb-0000-0000-0000-000000000001"
+EVALUATOR_UUID="eeeeeeee-0000-0000-0000-000000000001"
+CEO_UUID="cccccccc-0000-0000-0000-000000000001"
+CEO_MENTION_LINK="[@CEO](mention://agent/$CEO_UUID)"
+ENGINEER_A_MENTION_LINK="[@Engineer-A](mention://agent/$ENGINEER_A_UUID)"
+ENGINEER_B_MENTION_LINK="[@Engineer-B](mention://agent/$ENGINEER_B_UUID)"
+EVALUATOR_MENTION_LINK="[@Evaluator](mention://agent/$EVALUATOR_UUID)"
+
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
   exit 1
@@ -105,24 +115,31 @@ fi
 
 if [[ "$1 $2" == "pr view" ]]; then
   if printf '%s\n' "$*" | grep -Fq -- "--json body"; then
-    if [[ "$scenario" == "reviewed-with-action-items-unrelated-author-mention" ]]; then
-      printf 'Related Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\nThanks to [@Hao](mention://agent/f804cbdf-33d3-4a98-a6b5-2f7b796915b6) for early feedback.\n'
-    elif [[ "$scenario" == "reviewed-with-action-items-no-related-issue" ]]; then
-      printf 'No related Multica issue yet.\n'
-    else
-      printf 'Related Multica issue: [STO-42](mention://issue/2a16cdfb-f0e2-4d71-8dfd-a156a9b02b2e)\n'
-    fi
+    case "$scenario" in
+      unreviewed-author-engineer-a|reviewed-with-action-items|reviewed-with-action-items-review-issue-exists|reviewed-with-action-items-iter-cap|reviewed-with-prose-mention-not-counted)
+        printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nOriginal author: [@Engineer-A](mention://agent/aaaaaaaa-0000-0000-0000-000000000001)\n'
+        ;;
+      unreviewed-author-engineer-b)
+        printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nOriginal author: [@Engineer-B](mention://agent/bbbbbbbb-0000-0000-0000-000000000001)\n'
+        ;;
+      reviewed-with-action-items-unrelated-author-mention)
+        printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nThanks to [@Engineer-B](mention://agent/bbbbbbbb-0000-0000-0000-000000000001) for early feedback.\n'
+        ;;
+      *)
+        printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\n'
+        ;;
+    esac
     exit 0
   fi
 
-  if printf '%s\n' "$*" | grep -Fq -- "hao-reviewed: deadbeef"; then
+  if printf '%s\n' "$*" | grep -Fq -- "engineer-reviewed: deadbeef"; then
     if [[ "$scenario" == "reviewed-debate" ]]; then
       cat <<'COMMENTS'
 Verdict: request-changes
 
 - src/app.ts:7 -- missing regression test.
 
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
     else
       cat <<'COMMENTS'
@@ -130,13 +147,13 @@ Verdict: request-changes
 
 - src/app.ts:7 -- missing regression test.
 
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
     fi
     exit 0
   fi
 
-  if printf '%s\n' "$*" | grep -Fq -- "dustin-reviewed: deadbeef"; then
+  if printf '%s\n' "$*" | grep -Fq -- "evaluator-reviewed: deadbeef"; then
     if [[ "$scenario" == "reviewed-debate" ]]; then
       cat <<'COMMENTS'
 Verdict: approve
@@ -144,7 +161,7 @@ Verdict: approve
 Security findings: none.
 Performance findings: none.
 
-<!-- dustin-reviewed: deadbeef verdict: approve -->
+<!-- evaluator-reviewed: deadbeef verdict: approve -->
 COMMENTS
     else
       cat <<'COMMENTS'
@@ -154,7 +171,7 @@ Security findings: none.
 Performance findings:
 - [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
 
-<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+<!-- evaluator-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
     fi
     exit 0
@@ -164,14 +181,14 @@ COMMENTS
     cat <<'COMMENTS'
 <!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
 COMMENTS
-  elif [[ "$scenario" == "reviewed-hao-only-review-issue-exists" ]]; then
+  elif [[ "$scenario" == "reviewed-engineer-only-review-issue-exists" ]]; then
     cat <<'COMMENTS'
 <!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
 Verdict: request-changes
 
 - src/app.ts:7 -- missing regression test.
 
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
   elif [[ "$scenario" == "reviewed-with-action-items-review-issue-exists" ]]; then
     cat <<'COMMENTS'
@@ -180,14 +197,14 @@ Verdict: request-changes
 
 - src/app.ts:7 -- missing regression test.
 
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
 Verdict: request-changes
 
 Security findings: none.
 Performance findings:
 - [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
 
-<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+<!-- evaluator-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
   elif [[ "$scenario" == "reviewed-approve-approve-review-issue-exists" ]]; then
     cat <<'COMMENTS'
@@ -197,28 +214,28 @@ Verdict: approve
 What I checked:
 - src/app.ts:1 -- change is covered.
 
-<!-- hao-reviewed: deadbeef verdict: approve -->
+<!-- engineer-reviewed: deadbeef verdict: approve -->
 Verdict: approve
 
 Security findings: none.
 Performance findings: none.
 
-<!-- dustin-reviewed: deadbeef verdict: approve -->
+<!-- evaluator-reviewed: deadbeef verdict: approve -->
 COMMENTS
-  elif [[ "$scenario" == "reviewed-with-action-items" || "$scenario" == "reviewed-with-action-items-comment-fails" ]]; then
+  elif [[ "$scenario" == "reviewed-with-action-items" || "$scenario" == "reviewed-with-action-items-no-original-author" || "$scenario" == "reviewed-with-action-items-unrelated-author-mention" ]]; then
     cat <<'COMMENTS'
 Verdict: request-changes
 
 - src/app.ts:7 -- missing regression test.
 
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
 Verdict: request-changes
 
 Security findings: none.
 Performance findings:
 - [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
 
-<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+<!-- evaluator-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
   elif [[ "$scenario" == "reviewed-debate" ]]; then
     cat <<'COMMENTS'
@@ -226,43 +243,13 @@ Verdict: request-changes
 
 - src/app.ts:7 -- missing regression test.
 
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
 Verdict: approve
 
 Security findings: none.
 Performance findings: none.
 
-<!-- dustin-reviewed: deadbeef verdict: approve -->
-COMMENTS
-  elif [[ "$scenario" == "reviewed-with-action-items-no-related-issue" ]]; then
-    cat <<'COMMENTS'
-Verdict: request-changes
-
-- src/app.ts:7 -- missing regression test.
-
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
-Verdict: request-changes
-
-Security findings: none.
-Performance findings:
-- [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
-
-<!-- dustin-reviewed: deadbeef verdict: request-changes -->
-COMMENTS
-  elif [[ "$scenario" == "reviewed-approve-approve" ]]; then
-    cat <<'COMMENTS'
-Verdict: approve
-
-What I checked:
-- src/app.ts:1 -- change is covered.
-
-<!-- hao-reviewed: deadbeef verdict: approve -->
-Verdict: approve
-
-Security findings: none.
-Performance findings: none.
-
-<!-- dustin-reviewed: deadbeef verdict: approve -->
+<!-- evaluator-reviewed: deadbeef verdict: approve -->
 COMMENTS
   elif [[ "$scenario" == "reviewed-with-action-items-iter-cap" ]]; then
     cat <<'COMMENTS'
@@ -279,33 +266,19 @@ Verdict: request-changes
 
 - src/app.ts:7 -- still missing regression test.
 
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
 Verdict: request-changes
 
 Security findings: none.
 Performance findings:
 - [missing-timeout] src/app.ts:12 -- outbound call still has no timeout.
 
-<!-- dustin-reviewed: deadbeef verdict: request-changes -->
-COMMENTS
-  elif [[ "$scenario" == "reviewed-with-action-items-unrelated-author-mention" ]]; then
-    cat <<'COMMENTS'
-Verdict: request-changes
-
-- src/app.ts:7 -- missing regression test.
-
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
-Verdict: request-changes
-
-Security findings: none.
-Performance findings:
-- [missing-timeout] src/app.ts:12 -- outbound call has no timeout.
-
-<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+<!-- evaluator-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
   elif [[ "$scenario" == "reviewed-with-prose-mention-not-counted" ]]; then
-    # Old routing counted prior consensus sentinels and sometimes went back
-    # to the author. New routing ignores this for follow-up and pings CTO.
+    # Prose that quotes prior sentinels must not inflate the iteration
+    # counter — only real `<!-- consensus: ... -->` sentinels count. One real
+    # prior round + prose fakes = iteration 2 of 3, NOT a cap escalation.
     cat <<'COMMENTS'
 Earlier we noted the consensus: feedfeedfeedfeedfeedfeedfeedfeedfeedfeed verdict: request-changes call was wrong.
 
@@ -321,12 +294,12 @@ Verdict: request-changes
 
 - src/app.ts:7 -- still missing regression test.
 
-<!-- hao-reviewed: deadbeef verdict: request-changes -->
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
 Verdict: request-changes
 
 Security findings: none.
 
-<!-- dustin-reviewed: deadbeef verdict: request-changes -->
+<!-- evaluator-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
   fi
   exit 0
@@ -354,13 +327,13 @@ printf 'unexpected gh invocation: %s\n' "$*" >&2
 exit 64
 GH
 
-cat >"$tmp/bin/multica" <<'MULTICA'
+  cat >"$tmp/bin/multica" <<'MULTICA'
 #!/usr/bin/env bash
 set -euo pipefail
 
 if [[ "$1 $2" == "issue comment" && "${3:-}" == "list" ]]; then
   if [[ "$PR_SWEEP_TEST_SCENARIO" == "unreviewed-review-issue-exists" ]]; then
-    printf '[{"content":"<!-- multica-review-requested: deadbeef agent: hao -->"}]\n'
+    printf '[{"content":"<!-- multica-review-requested: deadbeef agent: engineer-a -->"}]\n'
   elif [[ "$PR_SWEEP_TEST_SCENARIO" == "reviewed-with-action-items-review-issue-exists" && "${PR_SWEEP_EXISTING_ORIGIN_COMMENT:-0}" == "1" ]]; then
     printf '[{"content":"<!-- multica-review-dispatched: deadbeef -->"}]\n'
   elif [[ "${PR_SWEEP_EXISTING_ORIGIN_COMMENT:-0}" == "1" ]]; then
@@ -444,9 +417,15 @@ MULTICA
     LANG=C \
     PATH="$tmp/bin:$PATH" \
     GH_OWNER="stone16" \
-    HAO_AGENT="Hao" \
-    DUSTIN_AGENT="Dustin" \
-    CTO_AGENT="Stometa" \
+    ENGINEER_A_AGENT="Engineer-A" \
+    ENGINEER_B_AGENT="Engineer-B" \
+    EVALUATOR_AGENT="Evaluator" \
+    CEO_AGENT="CEO" \
+    CEO_MENTION="$CEO_MENTION_LINK" \
+    ENGINEER_A_MENTION="$ENGINEER_A_MENTION_LINK" \
+    ENGINEER_B_MENTION="$ENGINEER_B_MENTION_LINK" \
+    EVALUATOR_MENTION="$EVALUATOR_MENTION_LINK" \
+    PR_SWEEP_IGNORE="${PR_SWEEP_IGNORE_OVERRIDE:-}" \
     bash "$SCRIPT" >"$tmp/stdout.log" 2>"$tmp/stderr.log"
   status=$?
   set -e
@@ -480,7 +459,7 @@ assert_line_before() {
   fi
 }
 
-test_unreviewed_pr_creates_one_review_issue_for_first_reviewer() {
+test_unreviewed_pr_creates_one_review_issue_for_peer_engineer() {
   local tmp
   tmp="$(run_sweep_with_stubs unreviewed)"
 
@@ -488,21 +467,26 @@ test_unreviewed_pr_creates_one_review_issue_for_first_reviewer() {
   assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
   assert_pr_comment_count "$tmp/captures" 1
-  assert_contains "$tmp/captures/issue-1.args" "--assignee Hao"
-  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Hao"
+  assert_contains "$tmp/captures/issue-1.args" "--assignee Engineer-A"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Engineer-A"
   assert_contains "$tmp/captures/issue-1.args" "--title PR review - stone16/sample-repo#12"
   assert_contains "$tmp/captures/issue-1.description.md" "[stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef"
   assert_contains "$tmp/captures/issue-1.description.md" "This is the single Multica thread for this PR review."
-  assert_contains "$tmp/captures/issue-comment-1.md" "Hao review is requested for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef."
-  assert_contains "$tmp/captures/issue-1.description.md" "Both reviewers are required on every PR; this is not a rotation."
+  assert_contains "$tmp/captures/issue-comment-1.md" "Engineer-A review is requested for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef."
+  assert_contains "$tmp/captures/issue-comment-1.md" "the Engineer peer lane"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- engineer-reviewed: <head-sha> verdict: <approve|request-changes|block> -->"
+  assert_contains "$tmp/captures/issue-1.description.md" "Two review lanes are required on every PR; this is not a rotation."
+  assert_contains "$tmp/captures/issue-1.description.md" "The Engineer peer lane"
+  assert_contains "$tmp/captures/issue-1.description.md" "The Evaluator adversarial lane owns security, performance, dependency-risk, and adversarial-input review."
   assert_contains "$tmp/captures/issue-1.description.md" "Documentation-only PRs receive the same dual review"
-  assert_contains "$tmp/captures/issue-1.description.md" "Minimum review bar is identical for both reviewers:"
+  assert_contains "$tmp/captures/issue-1.description.md" "Minimum review bar is identical for both lanes:"
+  assert_contains "$tmp/captures/issue-1.description.md" "rework to the PR's original author in this issue for up to 3 iterations"
   assert_contains "$tmp/captures/issue-1.description.md" "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
   assert_contains "$tmp/captures/issue-1.description.md" "If \`multica repo checkout\` fails because the SHA is unreachable"
   assert_contains "$tmp/captures/issue-1.description.md" "A sentinel must always reflect a review actually conducted on the SHA it tags"
   assert_contains "$tmp/captures/issue-1.description.md" "Use the PR link above in your PR comment and in this Multica issue summary"
-  assert_not_contains "$tmp/captures/issue-1.description.md" "non-docs production-code"
-  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: hao -->"
+  assert_contains "$tmp/captures/issue-1.description.md" "<!-- <engineer|evaluator>-reviewed: <head-sha> verdict: <approve|request-changes|block> -->"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: engineer-a -->"
   assert_contains "$tmp/captures/pr-comment-1.md" "<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->"
 
   # Race-condition guard: the headRefOid pin must appear BEFORE the worktree
@@ -511,6 +495,28 @@ test_unreviewed_pr_creates_one_review_issue_for_first_reviewer() {
   assert_line_before "$tmp/captures/issue-1.description.md" \
     "gh pr view <num> --repo <owner/repo> --json headRefOid --jq .headRefOid" \
     "multica repo checkout https://github.com/<owner>/<repo>.git --ref <head-sha>"
+}
+
+test_peer_lane_picks_engineer_b_when_author_is_engineer_a() {
+  local tmp
+  tmp="$(run_sweep_with_stubs unreviewed-author-engineer-a)"
+
+  assert_file_count "$tmp/captures" 1
+  assert_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-1.args" "--assignee Engineer-B"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Engineer-B"
+  assert_contains "$tmp/captures/issue-comment-1.md" "Engineer-B review is requested for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef."
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: engineer-b -->"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- engineer-reviewed: <head-sha> verdict: <approve|request-changes|block> -->"
+}
+
+test_peer_lane_picks_engineer_a_when_author_is_engineer_b() {
+  local tmp
+  tmp="$(run_sweep_with_stubs unreviewed-author-engineer-b)"
+
+  assert_contains "$tmp/captures/issue-1.args" "--assignee Engineer-A"
+  assert_contains "$tmp/captures/issue-comment-1.md" "Engineer-A review is requested for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef."
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: engineer-a -->"
 }
 
 test_existing_review_issue_marker_prevents_duplicate_review_request() {
@@ -522,25 +528,27 @@ test_existing_review_issue_marker_prevents_duplicate_review_request() {
   assert_update_count "$tmp/captures" 1
   assert_pr_comment_count "$tmp/captures" 0
   assert_contains "$tmp/captures/issue-update-1.args" "11111111-1111-1111-1111-000000000001"
-  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Hao"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Engineer-A"
   assert_contains "$tmp/stderr.log" "review-request=exists 11111111-1111-1111-1111-000000000001 stone16/sample-repo#12@deadbeef"
 }
 
-test_after_hao_review_routes_dustin_in_same_review_issue() {
+test_after_engineer_review_routes_evaluator_in_same_review_issue() {
   local tmp
-  tmp="$(run_sweep_with_stubs reviewed-hao-only-review-issue-exists)"
+  tmp="$(run_sweep_with_stubs reviewed-engineer-only-review-issue-exists)"
 
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
   assert_pr_comment_count "$tmp/captures" 0
   assert_contains "$tmp/captures/issue-update-1.args" "11111111-1111-1111-1111-000000000001"
-  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Dustin"
-  assert_contains "$tmp/captures/issue-comment-1.md" "Dustin review is requested for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef."
-  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: dustin -->"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Evaluator"
+  assert_contains "$tmp/captures/issue-comment-1.md" "Evaluator review is requested for [stone16/sample-repo#12](https://github.com/stone16/sample-repo/pull/12) @ deadbeef."
+  assert_contains "$tmp/captures/issue-comment-1.md" "the Evaluator adversarial lane"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- evaluator-reviewed: <head-sha> verdict: <approve|request-changes|block> -->"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: evaluator -->"
 }
 
-test_action_items_route_to_cto_in_pr_review_issue() {
+test_nonapprove_consensus_routes_rework_to_original_author() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-action-items)"
 
@@ -549,72 +557,93 @@ test_action_items_route_to_cto_in_pr_review_issue() {
   assert_update_count "$tmp/captures" 1
   assert_pr_comment_count "$tmp/captures" 2
   assert_contains "$tmp/captures/issue-comment-1.args" "11111111-1111-1111-1111-000000000001"
-  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Stometa"
-  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Engineer-A"
+  assert_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
   assert_contains "$tmp/captures/issue-comment-1.md" "- PR: https://github.com/stone16/sample-repo/pull/12"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Head commit: deadbeef"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: consensus: request-changes"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Hao verdict: request-changes"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Dustin verdict: request-changes"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-followup"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Engineer verdict (peer lane): request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Evaluator verdict (adversarial lane): request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration: 1 of 3"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
   assert_contains "$tmp/captures/issue-comment-1.md" "missing regression test."
   assert_contains "$tmp/captures/issue-comment-1.md" "outbound call has no timeout."
-  assert_contains "$tmp/captures/issue-comment-1.md" "## Discussion Protocol"
-  assert_contains "$tmp/captures/issue-comment-1.md" 'Reply to each reviewer finding in this issue with one of: `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`.'
-  assert_contains "$tmp/captures/issue-comment-1.md" "Keep the thread unresolved until CTO and reviewer agree on the outcome."
-  assert_contains "$tmp/captures/issue-comment-1.md" "End with a summary comment before marking the thread resolved."
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "hao-reviewed:"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "dustin-reviewed:"
+  assert_contains "$tmp/captures/issue-comment-1.md" "## Rework Protocol"
+  assert_contains "$tmp/captures/issue-comment-1.md" 'Reply to each reviewer finding in this issue with one of: `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`'
+  assert_contains "$tmp/captures/issue-comment-1.md" "Do not @-mention any agent"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "engineer-reviewed:"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "evaluator-reviewed:"
   assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-dispatched: deadbeef -->"
   assert_contains "$tmp/captures/pr-comment-1.md" "<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
-test_missing_related_issue_still_routes_to_cto_review_issue() {
+test_iteration_cap_escalates_to_ceo() {
   local tmp
-  tmp="$(run_sweep_with_stubs reviewed-with-action-items-no-related-issue)"
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items-iter-cap)"
+
+  assert_file_count "$tmp/captures" 1
+  assert_comment_count "$tmp/captures" 1
+  assert_update_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-comment-1.md" "iteration cap"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration count: 3 (cap: 3 — reached)"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
+  assert_contains "$tmp/captures/issue-comment-1.md" "## Discussion Protocol"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee CEO"
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
+}
+
+test_missing_original_author_escalates_to_ceo() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items-no-original-author)"
 
   assert_file_count "$tmp/captures" 1
   assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
   assert_pr_comment_count "$tmp/captures" 2
-  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-followup"
-  assert_not_contains "$tmp/captures/pr-comment-1.md" "Originating Multica issue link is missing."
-  assert_contains "$tmp/captures/pr-comment-1.md" "<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->"
+  assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-comment-1.md" "no \`Original author:"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
+  assert_contains "$tmp/captures/issue-comment-1.md" "## Discussion Protocol"
+  assert_contains "$tmp/captures/issue-comment-1.md" 'Reply to each reviewer finding in this issue with one of: `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`.'
+  assert_contains "$tmp/captures/issue-comment-1.md" "Keep the thread unresolved until the CEO and the reviewer agree on the outcome."
+  assert_contains "$tmp/captures/issue-comment-1.md" "End with a summary comment before marking the thread resolved."
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee CEO"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
-test_unrelated_author_mentions_are_ignored_because_cto_always_owns_followup() {
+test_unrelated_agent_mentions_do_not_route_rework() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-action-items-unrelated-author-mention)"
 
   assert_file_count "$tmp/captures" 1
   assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
-  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "f804cbdf-33d3-4a98-a6b5-2f7b796915b6"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-followup"
+  assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_B_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
-test_prior_iterations_do_not_route_back_to_author() {
+test_prior_prose_sentinels_do_not_inflate_iteration_count() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-prose-mention-not-counted)"
 
   assert_file_count "$tmp/captures" 1
   assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
-  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-followup"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "max-iterations-escalation"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Iteration: 2 of 3"
+  assert_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
 }
 
-test_approve_consensus_closes_existing_review_issue_without_cto() {
+test_approve_consensus_closes_existing_review_issue_without_ceo() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-approve-approve-review-issue-exists)"
 
@@ -626,21 +655,23 @@ test_approve_consensus_closes_existing_review_issue_without_cto() {
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: approve -->"
 }
 
-test_debate_routes_to_cto_in_pr_review_issue() {
+test_debate_routes_to_ceo_in_pr_review_issue() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-debate)"
 
   assert_file_count "$tmp/captures" 1
   assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
-  assert_contains "$tmp/captures/issue-comment-1.md" "[@CTO](mention://agent/2669622c-24fd-4254-bab7-2a7c2a5c5e12)"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "[@author](mention://agent/"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: cto-debate"
+  assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee CEO"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-debate"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: debate"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Hao verdict: request-changes"
-  assert_contains "$tmp/captures/issue-comment-1.md" "- Dustin verdict: approve"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "hao-reviewed:"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "dustin-reviewed:"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Engineer verdict (peer lane): request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Evaluator verdict (adversarial lane): approve"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "engineer-reviewed:"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "evaluator-reviewed:"
+  assert_contains "$tmp/captures/pr-comment.md" "- Engineer (peer lane): request-changes"
+  assert_contains "$tmp/captures/pr-comment.md" "- Evaluator (adversarial lane): approve"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- debate: deadbeef -->"
 }
 
@@ -673,7 +704,7 @@ test_review_outcome_failure_does_not_write_final_sentinel() {
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 0
   assert_comment_count "$tmp/captures" 0
-  [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "final PR sentinel was written even though CTO delegation failed"
+  [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "final PR sentinel was written even though outcome delegation failed"
   assert_contains "$tmp/stderr.log" "[warn] post_review_outcome_comment failed for stone16/sample-repo#12"
 }
 
@@ -688,17 +719,41 @@ test_existing_review_outcome_allows_final_comment_without_duplicate() {
   assert_contains "$tmp/stderr.log" "review-outcome=exists 11111111-1111-1111-1111-000000000001 stone16/sample-repo#12@deadbeef"
 }
 
-test_unreviewed_pr_creates_one_review_issue_for_first_reviewer
+test_env_ignore_list_skips_repo() {
+  local tmp
+  tmp="$(PR_SWEEP_IGNORE_OVERRIDE=$'# personal sandbox\nsample-repo' run_sweep_with_stubs unreviewed)"
+
+  assert_status "$tmp" 0
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
+  assert_pr_comment_count "$tmp/captures" 0
+  assert_contains "$tmp/stderr.log" "[skip] sample-repo (ignore list)"
+}
+
+test_env_ignore_list_nonmatching_repo_still_swept() {
+  local tmp
+  tmp="$(PR_SWEEP_IGNORE_OVERRIDE="other-repo" run_sweep_with_stubs unreviewed)"
+
+  assert_file_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-1.args" "--assignee Engineer-A"
+}
+
+test_unreviewed_pr_creates_one_review_issue_for_peer_engineer
+test_peer_lane_picks_engineer_b_when_author_is_engineer_a
+test_peer_lane_picks_engineer_a_when_author_is_engineer_b
 test_existing_review_issue_marker_prevents_duplicate_review_request
-test_after_hao_review_routes_dustin_in_same_review_issue
-test_action_items_route_to_cto_in_pr_review_issue
-test_missing_related_issue_still_routes_to_cto_review_issue
-test_unrelated_author_mentions_are_ignored_because_cto_always_owns_followup
-test_prior_iterations_do_not_route_back_to_author
-test_approve_consensus_closes_existing_review_issue_without_cto
-test_debate_routes_to_cto_in_pr_review_issue
+test_after_engineer_review_routes_evaluator_in_same_review_issue
+test_nonapprove_consensus_routes_rework_to_original_author
+test_iteration_cap_escalates_to_ceo
+test_missing_original_author_escalates_to_ceo
+test_unrelated_agent_mentions_do_not_route_rework
+test_prior_prose_sentinels_do_not_inflate_iteration_count
+test_approve_consensus_closes_existing_review_issue_without_ceo
+test_debate_routes_to_ceo_in_pr_review_issue
 test_existing_review_outcome_prevents_duplicate_when_final_comment_fails
 test_multica_dispatch_failure_does_not_abort_sweep
 test_review_outcome_failure_does_not_write_final_sentinel
 test_existing_review_outcome_allows_final_comment_without_duplicate
+test_env_ignore_list_skips_repo
+test_env_ignore_list_nonmatching_repo_still_swept
 printf 'PASS: pr-sweep PR issue routing tests\n'

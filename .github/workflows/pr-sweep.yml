@@ -1,8 +1,12 @@
 name: PR Sweep
 
-# Periodically scans open PRs across stone16/* and dispatches code-review work to
-# Senior Engineer (Hao) and Security & Performance Reviewer (Dustin) when needed.
-# Filtering is deterministic shell — no LLM is invoked unless real review work exists.
+# Periodically scans open PRs across stone16/* and dispatches code-review work
+# to the Engineer peer lane (the Engineer instance that did not author the PR)
+# and the Evaluator adversarial lane when needed. Filtering is deterministic
+# shell — no LLM is invoked unless real review work exists.
+#
+# Operational identity (agent names, mention links, workspace id, ignore list)
+# lives in GitHub Actions secrets/variables — never in tracked files.
 
 on:
   schedule:
@@ -27,12 +31,28 @@ jobs:
       GH_PAT: ${{ secrets.GH_PAT }}
       MULTICA_TOKEN: ${{ secrets.MULTICA_TOKEN }}
       MULTICA_SERVER_URL: 'https://api.multica.ai'
-      MULTICA_WORKSPACE_ID: 'a2b94a01-96c4-453a-bba0-627dd941716b'
+      MULTICA_WORKSPACE_ID: ${{ vars.MULTICA_WORKSPACE_ID }}
       GH_OWNER: stone16
-      HAO_AGENT: Hao
-      DUSTIN_AGENT: Dustin
+      # Multica assignee names; the script defaults to Engineer-A / Engineer-B /
+      # Evaluator / CEO when a variable is unset.
+      ENGINEER_A_AGENT: ${{ vars.ENGINEER_A_AGENT }}
+      ENGINEER_B_AGENT: ${{ vars.ENGINEER_B_AGENT }}
+      EVALUATOR_AGENT: ${{ vars.EVALUATOR_AGENT }}
+      CEO_AGENT: ${{ vars.CEO_AGENT }}
+      # Mention links in the `[@Name](mention://agent/<uuid>)` form. CEO_MENTION
+      # is the escalation target; the Engineer/Evaluator mentions map a PR's
+      # `Original author:` line to a roster identity for the peer-lane pick and
+      # for author rework routing.
+      CEO_MENTION: ${{ vars.CEO_MENTION }}
+      ENGINEER_A_MENTION: ${{ vars.ENGINEER_A_MENTION }}
+      ENGINEER_B_MENTION: ${{ vars.ENGINEER_B_MENTION }}
+      EVALUATOR_MENTION: ${{ vars.EVALUATOR_MENTION }}
+      # Newline-separated repo names to exclude from the sweep. Kept as a
+      # GitHub Actions variable so private repo names never live in tracked
+      # files; the tracked .pr-sweep-ignore file is the fallback when unset.
+      PR_SWEEP_IGNORE: ${{ vars.PR_SWEEP_IGNORE }}
     steps:
-      - name: Check required secrets are present
+      - name: Check required secrets and variables are present
         run: |
           set -e
           if [ -z "$GH_PAT" ]; then
@@ -42,6 +62,17 @@ jobs:
           if [ -z "$MULTICA_TOKEN" ]; then
             echo "::error::MULTICA_TOKEN secret is not configured. Generate a Multica PAT and add it to repo secrets."
             exit 1
+          fi
+          if [ -z "$MULTICA_WORKSPACE_ID" ]; then
+            echo "::error::MULTICA_WORKSPACE_ID variable is not configured. Add the Multica workspace UUID as a GitHub Actions variable."
+            exit 1
+          fi
+          if [ -z "$CEO_MENTION" ]; then
+            echo "::error::CEO_MENTION variable is not configured. Add the CEO mention link ([@CEO](mention://agent/<uuid>)) as a GitHub Actions variable so escalations reach the CEO."
+            exit 1
+          fi
+          if [ -z "$ENGINEER_A_MENTION" ] || [ -z "$ENGINEER_B_MENTION" ]; then
+            echo "::warning::ENGINEER_A_MENTION / ENGINEER_B_MENTION variables are not fully configured. The peer-lane pick degrades to always dispatching Engineer-A, and rework routing falls back to CEO escalation."
           fi
 
       - name: Checkout
