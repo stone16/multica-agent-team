@@ -131,7 +131,7 @@ The lenses differ, but the evidence bar is identical: check out the PR head SHA 
 
 ### Required GitHub Actions secrets and variables
 
-Set on this repository (`stone16/agent-team`):
+Set on this repository (`stone16/multica-agent-team`):
 
 | Secret | What it is | Scope |
 |---|---|---|
