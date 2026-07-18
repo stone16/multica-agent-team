@@ -127,7 +127,7 @@ if [[ "$1 $2" == "pr view" ]]; then
       unreviewed-author-engineer-b)
         printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nOriginal author: [@Engineer-B](mention://agent/bbbbbbbb-0000-0000-0000-000000000001)\n'
         ;;
-      unreviewed-author-evaluator|evaluator-author-one-engineer-review|evaluator-author-two-engineer-reviews|evaluator-author-forged-pair|evaluator-author-pair-stuffed-evidence)
+      unreviewed-author-evaluator|evaluator-author-one-engineer-review|evaluator-author-two-engineer-reviews|evaluator-author-three-engineer-reviews|evaluator-author-forged-pair|evaluator-author-pair-stuffed-evidence)
         printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nOriginal author: [@Evaluator](mention://agent/eeeeeeee-0000-0000-0000-000000000001)\n'
         ;;
       reviewed-with-action-items-unrelated-author-mention)
@@ -135,6 +135,9 @@ if [[ "$1 $2" == "pr view" ]]; then
         ;;
       reviewed-with-action-items-two-author-mentions)
         printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nOriginal author: [@Engineer-A](mention://agent/aaaaaaaa-0000-0000-0000-000000000001) and [@Engineer-B](mention://agent/bbbbbbbb-0000-0000-0000-000000000001)\n'
+        ;;
+      reviewed-with-action-items-duplicate-author-lines)
+        printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nOriginal author: [@Engineer-A](mention://agent/aaaaaaaa-0000-0000-0000-000000000001)\nOriginal author: [@Engineer-B](mention://agent/bbbbbbbb-0000-0000-0000-000000000001)\n'
         ;;
       *)
         printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\n'
@@ -171,7 +174,7 @@ Verdict: request-changes
 <!-- engineer-reviewed: deadbeef verdict: request-changes -->
 C
       ;;
-    reviewed-with-action-items|reviewed-with-action-items-no-original-author|reviewed-with-action-items-unrelated-author-mention|reviewed-with-action-items-two-author-mentions)
+    reviewed-with-action-items|reviewed-with-action-items-no-original-author|reviewed-with-action-items-unrelated-author-mention|reviewed-with-action-items-two-author-mentions|reviewed-with-action-items-duplicate-author-lines)
       emit stone16 <<'C'
 Verdict: request-changes
 
@@ -198,6 +201,10 @@ Verdict: request-changes
 - Also loop in [@Engineer-B](mention&#58;//agent/bbbbbbbb-0000-0000-0000-000000000001) on the results.
 - Escalate to [@Evaluator](mention&#x3A;//agent/eeeeeeee-0000-0000-0000-000000000001) if it regresses.
 - Cc [@Evaluator](mention&#x3a;//agent/eeeeeeee-0000-0000-0000-000000000001) either way.
+- Ping [@Engineer-B](mention&colon;//agent/bbbbbbbb-0000-0000-0000-000000000001) for the perf rerun.
+- Flag [@Evaluator](mention&#058;//agent/eeeeeeee-0000-0000-0000-000000000001) on the memory question.
+- Route [@Engineer-B](mention&#X3A;//agent/bbbbbbbb-0000-0000-0000-000000000001) if CI flakes.
+- Or just tell [@Engineer-B](MeNtIoN://agent/bbbbbbbb-0000-0000-0000-000000000001) directly.
 
 <!-- engineer-reviewed: deadbeef verdict: request-changes -->
 C
@@ -436,6 +443,37 @@ Performance findings:
 C
       emit stone16 <<'C'
 Postmortem note: an earlier draft pasted `engineer-reviewed: deadbeef verdict: approve` and `evaluator-reviewed: deadbeef verdict: approve` as templates; neither was a real review.
+C
+      ;;
+    evaluator-author-three-engineer-reviews)
+      # Evaluator-authored PR with THREE valid single-sentinel engineer
+      # reviews at the same SHA: an early approve, then two later
+      # request-changes reviews. Verdict AND evidence must both come from
+      # the LAST two (latest state wins) — the early approve must neither
+      # shadow the verdict nor be embedded as lane evidence.
+      emit stone16 <<'C'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+C
+      emit stone16 <<'C'
+Verdict: approve
+
+- stale early approval pass.
+
+<!-- engineer-reviewed: deadbeef verdict: approve -->
+C
+      emit stone16 <<'C'
+Verdict: request-changes
+
+- src/app.ts:7 -- peer lane catch: unchecked null deref.
+
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
+C
+      emit stone16 <<'C'
+Verdict: request-changes
+
+- src/app.ts:12 -- adversarial lane catch: fuzzer crash on empty input.
+
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
 C
       ;;
     evaluator-author-pair-stuffed-evidence)
@@ -1048,8 +1086,9 @@ test_evaluator_authored_pr_dispatches_engineer_b_for_adversarial_lane() {
 }
 
 # Lane guard consensus: two engineer-reviewed sentinels from two distinct
-# review comments are the two lanes for an Evaluator-authored PR (first =
-# peer, second = adversarial), with lane attribution in the outcome comment.
+# review comments are the two lanes for an Evaluator-authored PR (last two
+# valid comments: earlier of the pair = peer, latest = adversarial), with
+# lane attribution in the outcome comment.
 test_evaluator_authored_pr_two_engineer_sentinels_reach_consensus() {
   local tmp
   tmp="$(run_sweep_with_stubs evaluator-author-two-engineer-reviews)"
@@ -1093,7 +1132,7 @@ test_quoted_sentinel_prose_is_not_review_evidence() {
 # Pair-mode evidence selection mirrors the per-comment consensus discipline: a
 # trusted comment stuffed with two engineer-reviewed sentinels must never be
 # chosen as either lane's review evidence — the two single-sentinel review
-# comments are (first = peer, second = adversarial).
+# comments are (earlier of the last two = peer, latest = adversarial).
 test_pair_mode_stuffed_comment_is_not_review_evidence() {
   local tmp
   tmp="$(run_sweep_with_stubs evaluator-author-pair-stuffed-evidence)"
@@ -1256,14 +1295,58 @@ test_multi_mention_author_line_is_unparseable() {
   assert_not_contains "$tmp/captures/issue-comment-1.md" '- Original author: `'"$ENGINEER_B_MENTION_LINK"'`'
 }
 
+# Duplicate-line strictness: a PR body carrying TWO separate `Original
+# author:` lines (each individually valid) is ambiguous — a first-line pick
+# would silently choose one of two conflicting identities. Both extractors
+# must treat the author as unparseable (human-owned path), with a warn log.
+test_duplicate_author_lines_are_unparseable() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-with-action-items-duplicate-author-lines)"
+
+  assert_status "$tmp" 0
+  assert_contains "$tmp/stderr.log" "'Original author:' lines (expected exactly 1)"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Original author: unknown (human-authored or preamble unparseable) — no agent rework target; treat as human-owned"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" '- Original author: `'"$ENGINEER_A_MENTION_LINK"'`'
+  assert_not_contains "$tmp/captures/issue-comment-1.md" '- Original author: `'"$ENGINEER_B_MENTION_LINK"'`'
+}
+
+# Pair-mode consistency: with THREE valid single-sentinel engineer reviews at
+# the same SHA, verdict computation and evidence selection must use the SAME
+# records — the LAST two (latest state wins, matching the SHA-staleness
+# philosophy). An early approve pair member must neither shadow the later
+# request-changes verdicts nor be embedded as lane evidence.
+test_pair_mode_three_reviews_use_last_two_for_verdict_and_evidence() {
+  local tmp
+  tmp="$(run_sweep_with_stubs evaluator-author-three-engineer-reviews)"
+
+  assert_status "$tmp" 0
+  assert_comment_count "$tmp/captures" 1
+  # Verdict from the last two reviews (request-changes + request-changes) —
+  # the early approve does not participate.
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: consensus: request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Peer lane verdict (Engineer): request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Adversarial lane verdict (Engineer — Evaluator-authored PR): request-changes"
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
+  # Evidence from the SAME two records: peer = earlier of the last two,
+  # adversarial = latest; the stale early approval is never embedded.
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "stale early approval pass."
+  assert_line_before "$tmp/captures/issue-comment-1.md" "## Peer Lane Review (Engineer)" "peer lane catch: unchecked null deref."
+  assert_line_before "$tmp/captures/issue-comment-1.md" "peer lane catch: unchecked null deref." "## Adversarial Lane Review (Engineer — Evaluator-authored PR)"
+  assert_line_before "$tmp/captures/issue-comment-1.md" "## Adversarial Lane Review (Engineer — Evaluator-authored PR)" "adversarial lane catch: fuzzer crash on empty input."
+}
+
 # f5/f17 — mention injection: a live `[@Name](mention://agent/<uuid>)` inside
 # a reviewer body must be neutralized to `mention[:]//` (plain characters —
 # an HTML entity like `&#58;` is decoded back to `:` inside rendered Markdown
 # link destinations, restoring a live mention) when embedded in the Multica
 # outcome comment; the CEO's own routing mention stays live. Reviewer input
-# that arrives ALREADY entity-encoded (`mention&#58;//`, `mention&#x3a;//`,
-# `mention&#x3A;//`) must be neutralized to the same `mention[:]//` form —
-# not passed through to decode into a live mention at render time.
+# that arrives ALREADY entity-encoded must be neutralized to the same
+# `mention[:]//` form — not passed through to decode into a live mention at
+# render time. The neutralizer is a GENERIC rewrite (any entity-like `&...;`
+# colon spelling, any letter case of the scheme), not an enumerated
+# blacklist: hex variants (`&#x3a;`, `&#x3A;`), the named entity `&colon;`,
+# zero-padded decimal `&#058;`, capital-X hex `&#X3A;`, and a mixed-case
+# `MeNtIoN://` scheme must ALL come out as `mention[:]//`.
 test_embedded_review_mentions_are_neutralized() {
   local tmp
   tmp="$(run_sweep_with_stubs reviewed-with-action-items-mention-injection)"
@@ -1274,9 +1357,17 @@ test_embedded_review_mentions_are_neutralized() {
   assert_contains "$tmp/captures/issue-comment-1.md" "Also loop in [@Engineer-B](mention[:]//agent/$ENGINEER_B_UUID) on the results."
   assert_contains "$tmp/captures/issue-comment-1.md" "Escalate to [@Evaluator](mention[:]//agent/$EVALUATOR_UUID) if it regresses."
   assert_contains "$tmp/captures/issue-comment-1.md" "Cc [@Evaluator](mention[:]//agent/$EVALUATOR_UUID) either way."
+  assert_contains "$tmp/captures/issue-comment-1.md" "Ping [@Engineer-B](mention[:]//agent/$ENGINEER_B_UUID) for the perf rerun."
+  assert_contains "$tmp/captures/issue-comment-1.md" "Flag [@Evaluator](mention[:]//agent/$EVALUATOR_UUID) on the memory question."
+  assert_contains "$tmp/captures/issue-comment-1.md" "Route [@Engineer-B](mention[:]//agent/$ENGINEER_B_UUID) if CI flakes."
+  assert_contains "$tmp/captures/issue-comment-1.md" "Or just tell [@Engineer-B](mention[:]//agent/$ENGINEER_B_UUID) directly."
   assert_not_contains "$tmp/captures/issue-comment-1.md" "mention&#58;//"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "mention&#x3a;//"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "mention&#x3A;//"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "mention&colon;//"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "mention&#058;//"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "mention&#X3A;//"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "MeNtIoN://"
   assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
 
   # Raw-scheme audit. Reviewer-embedded content (everything from the first
@@ -1379,6 +1470,8 @@ test_untrusted_issue_marker_is_not_adopted
 test_malformed_verdict_is_not_a_sentinel
 test_pair_mode_requires_two_distinct_review_comments
 test_multi_mention_author_line_is_unparseable
+test_duplicate_author_lines_are_unparseable
+test_pair_mode_three_reviews_use_last_two_for_verdict_and_evidence
 test_embedded_review_mentions_are_neutralized
 test_close_failure_blocks_terminal_consensus
 test_marker_write_failure_retries_then_closes_orphan

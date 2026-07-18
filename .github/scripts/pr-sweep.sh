@@ -314,17 +314,29 @@ mention_agent_uuid() {
 # the author. Returns empty if the line is absent or carries no agent
 # mention; callers fall back to the Engineer-A peer default, and the CEO
 # outcome comment notes that the author could not be identified.
-# The line must carry EXACTLY ONE `mention://agent/` occurrence: with two
-# mentions the greedy-UUID extraction and the first-markdown extraction would
-# resolve to conflicting identities, letting a crafted line dodge the
+# The body must carry EXACTLY ONE `Original author:` line: with two separate
+# (individually valid) lines a first-line pick would silently choose one of
+# two conflicting identities, so a crafted duplicate line could dodge the
+# self-review guard. Multiple lines → unparseable (human-owned path), with a
+# log line saying why; zero lines is the ordinary human-authored case and
+# returns empty silently.
+# The line must then carry EXACTLY ONE `mention://agent/` occurrence: with
+# two mentions the greedy-UUID extraction and the first-markdown extraction
+# would resolve to conflicting identities, letting a crafted line dodge the
 # self-review guard. Zero or multiple mentions → unparseable (human-owned
 # path), with a log line saying why.
 original_author_id_from_body() {
-  local body="$1" line mention_count
+  local body="$1" line line_count mention_count
   # `|| true`: grep exits 1 when the line is absent (human-authored PRs);
   # keep the function at rc 0 with empty stdout so top-level `var=$(...)`
   # assignments under set -e -o pipefail don't abort the sweep.
-  line=$(printf '%s\n' "$body" | grep -E '^[[:space:]]*Original author:' | head -1 || true)
+  line_count=$(printf '%s\n' "$body" | grep -cE '^[[:space:]]*Original author:' || true)
+  [[ "$line_count" != "0" ]] || return 0
+  if [[ "$line_count" != "1" ]]; then
+    log "    [warn] PR body carries $line_count 'Original author:' lines (expected exactly 1); treating author as unparseable (human-owned path)"
+    return 0
+  fi
+  line=$(printf '%s\n' "$body" | grep -E '^[[:space:]]*Original author:' || true)
   [[ -n "$line" ]] || return 0
   mention_count=$(printf '%s\n' "$line" \
     | grep -oE 'mention://agent/[0-9a-fA-F-]{36}' \
@@ -343,12 +355,15 @@ original_author_id_from_body() {
 # `- Original author:` line in the CEO outcome comment (wrapped in backticks
 # there so it never acts as a live mention — leader-only routing holds).
 # Returns empty when the line is absent or its mention markdown is unparseable.
-# Same exactly-one-mention rule as original_author_id_from_body: zero or
-# multiple mentions on the line → empty (author unknown), so the two
-# extraction paths can never disagree about the author's identity.
+# Same exactly-one-line and exactly-one-mention rules as
+# original_author_id_from_body: multiple `Original author:` lines in the
+# body, or zero/multiple mentions on the line → empty (author unknown), so
+# the two extraction paths can never disagree about the author's identity.
 original_author_mention_from_body() {
-  local body="$1" line mention_count
-  line=$(printf '%s\n' "$body" | grep -E '^[[:space:]]*Original author:' | head -1 || true)
+  local body="$1" line line_count mention_count
+  line_count=$(printf '%s\n' "$body" | grep -cE '^[[:space:]]*Original author:' || true)
+  [[ "$line_count" == "1" ]] || return 0
+  line=$(printf '%s\n' "$body" | grep -E '^[[:space:]]*Original author:' || true)
   [[ -n "$line" ]] || return 0
   mention_count=$(printf '%s\n' "$line" \
     | grep -oE 'mention://agent/[0-9a-fA-F-]{36}' \
@@ -614,19 +629,21 @@ review_comment_body() {
 # `mention[:]//` — plain literal characters that render readably but can
 # never fire a live mention. An HTML-entity form like `mention&#58;//` is
 # NOT safe here: Markdown parsers decode entities inside link destinations,
-# so a rendered link could restore the live scheme. For the same reason,
-# reviewer input that ALREADY carries an entity-encoded colon (decimal
-# `&#58;` or hex `&#x3a;` / `&#x3A;`) must be rewritten too — otherwise it
-# passes through untouched and decodes into a live `mention://` at Markdown
-# render time. Leader-only routing depends on this — the CEO's own routing
-# mention lives in the script-authored header, never inside neutralized
-# content.
+# so a rendered link could restore the live scheme. Enumerating specific
+# entity spellings is a losing blacklist — named `&colon;`, zero-padded
+# `&#058;`, capital-X hex `&#X3A;`, and every further variant all slip past
+# a fixed list. So the defense is GENERIC: the scheme name `mention` in any
+# letter case, followed by either a literal `:` or ANY entity-like sequence
+# (`&` + 1-8 chars of [#a-zA-Z0-9] + `;`), then `//`, is collapsed to the
+# single inert form `mention[:]//`. Anything that could decode into a colon
+# at Markdown render time is rewritten before it gets the chance;
+# already-neutralized `mention[:]//` does not match, so the rewrite is
+# idempotent. macOS sed lacks a case-insensitive flag, hence the explicit
+# per-letter case classes. Leader-only routing depends on this — the CEO's
+# own routing mention lives in the script-authored header, never inside
+# neutralized content.
 neutralize_mentions() {
-  sed \
-    -e 's|mention&#58;//|mention[:]//|g' \
-    -e 's|mention&#x3a;//|mention[:]//|g' \
-    -e 's|mention&#x3A;//|mention[:]//|g' \
-    -e 's|mention://|mention[:]//|g'
+  sed -E 's@[Mm][Ee][Nn][Tt][Ii][Oo][Nn](:|&[#a-zA-Z0-9]{1,8};)//@mention[:]//@g'
 }
 
 post_review_outcome_comment() {
@@ -643,8 +660,10 @@ post_review_outcome_comment() {
 
   if [[ "$lane_mode" == "engineer-pair" ]]; then
     # Evaluator-authored PR: both lanes wrote `engineer-reviewed` sentinels in
-    # two distinct review comments — first is the peer lane, second is the
-    # adversarial checklist lane.
+    # two distinct review comments. Evidence comes from the LAST two valid
+    # single-sentinel comments for this SHA — idx -2 (earlier of the pair) is
+    # the peer lane, idx -1 (latest) the adversarial checklist lane — the
+    # SAME records the pair-mode consensus computed its verdict from.
     adv_name="engineer-reviewed"
     peer_idx="-2"
     peer_verdict_label="Peer lane verdict (Engineer)"
@@ -1076,7 +1095,8 @@ while IFS= read -r repo; do
       # Both lanes are carried by the two Engineer instances (peer:
       # Engineer-A, adversarial checklist: Engineer-B); consensus accepts two
       # `engineer-reviewed` sentinels from two distinct review comments as
-      # the two lanes (first = peer, second = adversarial).
+      # the two lanes — the LAST two valid comments for this SHA, with the
+      # earlier of that pair as peer and the latest as adversarial.
       # Pair mode requires two DISTINCT trusted comments, each carrying
       # exactly one engineer-reviewed sentinel for this SHA. A single comment
       # stuffed with two sentinels satisfies neither lane — parse per-comment,
@@ -1098,8 +1118,14 @@ while IFS= read -r repo; do
       eng_count=0
       [[ -n "$pair_verdicts" ]] && eng_count=$(printf '%s' "$pair_verdicts" | grep -c .)
       if (( eng_count >= 2 )); then
-        v_peer=$(printf '%s' "$pair_verdicts" | sed -n '1p')
-        v_adv=$(printf '%s' "$pair_verdicts" | sed -n '2p')
+        # Latest state wins (same philosophy as SHA-staleness elsewhere):
+        # the verdict is computed from the LAST two valid single-sentinel
+        # comments — the SAME records evidence embedding selects
+        # (review_comment_body idx -2/-1). Taking the FIRST two here while
+        # evidence takes the last two would let an early approve-pair shadow
+        # a later request-changes and misattribute findings.
+        v_peer=$(printf '%s' "$pair_verdicts" | tail -n 2 | sed -n '1p')
+        v_adv=$(printf '%s' "$pair_verdicts" | tail -n 2 | sed -n '2p')
         write_consensus "$repo" "$num" "$sha" "$v_peer" "$v_adv" "$trusted_body" "$author_uuid" "$author_mention" "engineer-pair"
       elif (( eng_count == 1 )); then
         first_v=$(printf '%s' "$pair_verdicts" | sed -n '1p')

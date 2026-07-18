@@ -67,12 +67,12 @@ States are driven by Multica's native re-trigger — assigning an issue to the s
 
 1. **Issue assigned to squad** → read the issue and the roster; write or update the plan as an issue comment (numbered steps, each with target profession + DoD); then post ONE delegation comment @-mentioning the member(s) for the first step(s), each with its inline DoD block. Stop.
 2. **Re-triggered by a member delivery comment** (no mentions in it) → check the delivery against that step's `dod.evidence`, item by item.
-   - Evidence complete + `verification: self` → mark the step done in the plan comment; dispatch the next step (new delegation comment) or close out.
+   - Evidence complete + `verification: self` → mark the step done in the plan comment; dispatch the next step (new delegation comment) or close out. If the step is an auto-harness checkpoint child, also run the E2E hand-off check (Auto-Harness Child Dispatch, step 6).
    - `verification: evaluator` → dispatch Evaluator with a verification DoD. The step is NOT done yet; it closes only via the return transition in state 3.
    - Evidence missing or failed → rework dispatch to the same member with the gap named; increment the round count. If rounds > `max_rounds` → STOP routing; post an escalation comment addressed to the human (no agent mentions) summarizing state and options.
    - `verification: human` gate reached → post a comment asking the human; do not proceed.
 3. **Re-triggered by an Evaluator verification delivery** (the return transition for a `verification: evaluator` dispatch from state 2):
-   - Verification **PASS** → mark the verified step done in the plan comment; dispatch the next step (new delegation comment) or close out.
+   - Verification **PASS** → mark the verified step done in the plan comment; dispatch the next step (new delegation comment) or close out. If the step is an auto-harness checkpoint child, also run the E2E hand-off check (Auto-Harness Child Dispatch, step 6).
    - Verification **FAIL** → route the named gap back to the ORIGINAL executor of the step as a rework dispatch, counted against that step's `max_rounds`. NEVER dispatch rework to the Evaluator — the Evaluator found the gap; it does not fix it.
    - Delivery neither passes nor fails cleanly (ambiguous, partial, or scope-shifted verdict) → treat as needs-discussion: post a comment asking the human (no agent mentions); do not proceed.
 4. **Re-triggered by anything else** (human comment, cross-reference) → decide route or, if no action is needed, exit silently.
@@ -151,7 +151,8 @@ Re-triggered by a delivery comment containing `[auto-harness: checkpoint-plan]` 
    - cp-NN → [STO-NNN](mention://issue/<id>) → Engineer
    ```
 
-5. Then normal states apply: child deliveries re-trigger you through States 2–3; when every child closes, the proposing Engineer's next re-trigger continues the harness flow.
+5. Then normal states apply: child deliveries re-trigger you through States 2–3.
+6. **E2E hand-off — this transition is yours; nothing else triggers it.** Child deliveries re-trigger you on the child issues, not the Engineer on the parent, so without this dispatch the flow stalls permanently. A checkpoint child is closed ONLY when its status is `done` AND, where its `dod` specified `verification: evaluator`, the Evaluator's verdict is PASS; `in_review` is NOT closed. On any re-trigger, when ALL `harness:cp` children of an auto-harness parent meet that bar, post a delegation comment on the PARENT issue @-mentioning the proposing Engineer, with a DoD whose `outcome` is the `[auto-harness: e2e-plan]` delivery on the parent.
 
 ## PR Review Adjudication (pr-sweep)
 

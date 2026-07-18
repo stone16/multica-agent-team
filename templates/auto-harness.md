@@ -155,11 +155,20 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
 4. After posting the checkpoint plan, set parent status `in_review`. Exit
    silently; dispatch is the CEO's move, not yours.
 
-### E2E Dispatch (after every checkpoint child closes)
+### E2E Dispatch (after every checkpoint child is done)
 
-When the parent agent re-runs and detects every `harness:cp` child issue is
-closed (`done` or `in_review`), propose exactly one E2E child in a comment on
-the parent — do not create it yourself:
+A checkpoint child counts as closed ONLY when its status is `done` AND, where
+its `dod` specified `verification: evaluator`, the Evaluator's verification
+verdict is PASS. `in_review` is explicitly NOT closed — a child awaiting
+evaluator verification still blocks this step. Do not propose the E2E child
+while any checkpoint fails that bar.
+
+You do not self-trigger this step: child deliveries re-trigger the CEO, not
+you. When the CEO observes (on any re-trigger) that ALL `harness:cp` children
+of the parent meet the bar above, the CEO posts a dispatch on the PARENT issue
+@-mentioning you, the proposing Engineer, with a DoD whose `outcome` is the
+`[auto-harness: e2e-plan]` delivery. On that dispatch, propose exactly one E2E
+child in a comment on the parent — do not create it yourself:
 
 ```
 [auto-harness: e2e-plan]
