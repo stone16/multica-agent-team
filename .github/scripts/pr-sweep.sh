@@ -43,7 +43,9 @@ GH_OWNER="${GH_OWNER:-stone16}"
 # Newline/space separated. Defaults to GH_OWNER — set it to the bot login(s)
 # the agents comment through. Sentinels in comments from any other author are
 # ignored with a log line: arbitrary commenters must never be able to forge
-# review state on a public repo.
+# review state on a public repo. The `multica-pr-review-issue` marker the
+# sweep itself posts is honored under the same trust rule, so the login the
+# sweep's own PR comments land under must be listed here too.
 TRUSTED_SENTINEL_AUTHORS="${TRUSTED_SENTINEL_AUTHORS:-$GH_OWNER}"
 
 # Enumeration caps. Saturation (returned count == limit) is detected as a
@@ -157,23 +159,26 @@ is_trusted_author() {
     | grep -Fxq -- "$login"
 }
 
-# Detects any sweep-protocol sentinel in a comment body — used only to log
-# when an untrusted comment tried to carry one.
+# Detects any sweep-protocol sentinel or marker in a comment body — used only
+# to log when an untrusted comment tried to carry one.
 comment_has_any_sentinel() {
   printf '%s' "$1" \
-    | grep -qE '<!--[[:space:]]*(engineer-reviewed|evaluator-reviewed|ceo-resolved|consensus|debate):'
+    | grep -qE '<!--[[:space:]]*(engineer-reviewed|evaluator-reviewed|ceo-resolved|consensus|debate|multica-pr-review-issue):'
 }
 
-# Flattened bodies of ALL comments regardless of author. Used only where
-# sentinel authority is not required (issue-marker lookup fallback) — every
-# sentinel decision must read trusted-author comments instead.
-pr_comments_body() {
+# Flattened bodies of comments from TRUSTED_SENTINEL_AUTHORS only. Every
+# consumer of PR-thread state — sentinel decisions AND the
+# `multica-pr-review-issue` marker lookup — reads trusted-author comments,
+# so an arbitrary commenter can neither forge review state nor redirect the
+# review thread to another Multica issue.
+pr_trusted_comments_body() {
   local raw login b64
   if ! raw=$(pr_comments_with_authors "$1" "$2"); then
     return 1
   fi
   while IFS=$'\t' read -r login b64; do
     [[ -z "$login" && -z "$b64" ]] && continue
+    is_trusted_author "$login" || continue
     decode_b64 "$b64"
     printf '\n'
   done <<<"$raw"
@@ -395,6 +400,11 @@ review_issue_marker() {
   printf '<!-- multica-pr-review-issue: %s -->' "$issue_id"
 }
 
+# Callers must pass TRUSTED-author comment bodies only (`trusted_body` from
+# the main loop, or `pr_trusted_comments_body`): a forged
+# `<!-- multica-pr-review-issue: id -->` marker in an arbitrary commenter's
+# comment must never redirect review dispatch, assignment, or status updates
+# to another Multica issue.
 review_issue_id_from_comments() {
   local comments="$1"
   printf '%s\n' "$comments" \
@@ -588,11 +598,14 @@ review_comment_body() {
 
 # Neutralize agent-mention URIs inside third-party (reviewer-authored)
 # content before embedding it in a Multica comment: `mention://` becomes
-# `mention&#58;//`, which renders readably but can never fire a live mention.
-# Leader-only routing depends on this — the CEO's own routing mention lives
-# in the script-authored header, never inside neutralized content.
+# `mention[:]//` — plain literal characters that render readably but can
+# never fire a live mention. An HTML-entity form like `mention&#58;//` is
+# NOT safe here: Markdown parsers decode entities inside link destinations,
+# so a rendered link could restore the live scheme. Leader-only routing
+# depends on this — the CEO's own routing mention lives in the
+# script-authored header, never inside neutralized content.
 neutralize_mentions() {
-  sed 's|mention://|mention\&#58;//|g'
+  sed 's|mention://|mention[:]//|g'
 }
 
 post_review_outcome_comment() {
@@ -840,21 +853,21 @@ close_review_issue_if_known() {
 #                           iteration line lets the CEO enforce the cap)
 #   approve + approve     → close the PR's review issue
 write_consensus() {
-  local repo="$1" num="$2" sha="$3" engineer="$4" evaluator="$5" comments="${6:-}" author_uuid="${7:-}" author_mention="${8:-}" lane_mode="${9:-standard}" trusted="${10:-}"
+  local repo="$1" num="$2" sha="$3" engineer="$4" evaluator="$5" comments="${6:-}" author_uuid="${7:-}" author_mention="${8:-}" lane_mode="${9:-standard}"
   local peer_lane_label="Engineer (peer lane)" adv_lane_label="Evaluator (adversarial lane)"
   if [[ "$lane_mode" == "engineer-pair" ]]; then
     adv_lane_label="Engineer (adversarial lane — Evaluator-authored PR)"
   fi
+  # `comments` carries TRUSTED-author comment bodies only: both the
+  # issue-marker lookup and sentinel-derived state (the iteration counter)
+  # must never read untrusted content.
   if [[ -z "$comments" ]]; then
-    if ! comments="$(pr_comments_body "$repo" "$num")"; then
+    if ! comments="$(pr_trusted_comments_body "$repo" "$num")"; then
       log "    [warn] fetch failed for PR comments on $GH_OWNER/$repo#$num; skipping this sweep"
       PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
       return 0
     fi
   fi
-  # Sentinel-derived state (the iteration counter) reads only trusted-author
-  # comments; `comments` (all authors) serves the issue-marker lookup only.
-  [[ -n "$trusted" ]] || trusted="$comments"
 
   if [[ "$engineer" == "$evaluator" ]]; then
     if [[ "$engineer" == "approve" ]]; then
@@ -866,7 +879,7 @@ write_consensus() {
       fi
     else
       local iter reason
-      iter="$(iteration_count "$trusted")"
+      iter="$(iteration_count "$comments")"
       : "${iter:=0}"
 
       reason=""
@@ -969,17 +982,17 @@ while IFS= read -r repo; do
       continue
     fi
 
-    # Split the thread by sentinel trust: `body` (all comments) serves only
-    # the multica-pr-review-issue marker lookup; every sentinel decision
-    # reads `trusted_body` (or the per-comment list `trusted_b64s`), so a
-    # comment from an arbitrary GitHub user can never forge review state.
-    body=""
+    # Only trusted-author comments feed sweep state: every sentinel decision
+    # AND the multica-pr-review-issue marker lookup read `trusted_body` (or
+    # the per-comment list `trusted_b64s`), so a comment from an arbitrary
+    # GitHub user can neither forge review state nor redirect the review
+    # thread to another Multica issue. Untrusted comments carrying a
+    # sweep-protocol sentinel or marker are logged and ignored.
     trusted_body=""
     trusted_b64s=""
     while IFS=$'\t' read -r c_login c_b64; do
       [[ -z "$c_login" && -z "$c_b64" ]] && continue
       c_body="$(decode_b64 "$c_b64")"
-      body+="$c_body"$'\n'
       if is_trusted_author "$c_login"; then
         trusted_body+="$c_body"$'\n'
         trusted_b64s+="$c_b64"$'\n'
@@ -1011,7 +1024,7 @@ while IFS= read -r repo; do
       if [[ "$resolved_v" == "approve" ]]; then
         # Close FIRST; the terminal consensus sentinel is only written after
         # a successful close (retry next sweep otherwise).
-        if ! close_review_issue_if_known "$repo" "$num" "$sha" "$body"; then
+        if ! close_review_issue_if_known "$repo" "$num" "$sha" "$trusted_body"; then
           continue
         fi
       fi
@@ -1066,14 +1079,14 @@ while IFS= read -r repo; do
       if (( eng_count >= 2 )); then
         v_peer=$(printf '%s' "$pair_verdicts" | sed -n '1p')
         v_adv=$(printf '%s' "$pair_verdicts" | sed -n '2p')
-        write_consensus "$repo" "$num" "$sha" "$v_peer" "$v_adv" "$body" "$author_uuid" "$author_mention" "engineer-pair" "$trusted_body"
+        write_consensus "$repo" "$num" "$sha" "$v_peer" "$v_adv" "$trusted_body" "$author_uuid" "$author_mention" "engineer-pair"
       elif (( eng_count == 1 )); then
         first_v=$(printf '%s' "$pair_verdicts" | sed -n '1p')
         log "  [need-adversarial-engineer] $pr_id (evaluator-authored; first engineer verdict=$first_v)"
-        dispatch_review_request "$repo" "$num" "$sha" "$body" "$ENGINEER_B_AGENT" "adversarial-engineer" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
+        dispatch_review_request "$repo" "$num" "$sha" "$trusted_body" "$ENGINEER_B_AGENT" "adversarial-engineer" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
       else
         log "  [need-engineer-first] $pr_id (evaluator-authored; peer=$ENGINEER_A_AGENT)"
-        dispatch_review_request "$repo" "$num" "$sha" "$body" "$ENGINEER_A_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
+        dispatch_review_request "$repo" "$num" "$sha" "$trusted_body" "$ENGINEER_A_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
       fi
       continue
     fi
@@ -1082,16 +1095,16 @@ while IFS= read -r repo; do
     evaluator_v=$(sentinel_verdict "$trusted_body" "evaluator-reviewed" "$sha")
 
     if [[ -n "$engineer_v" && -n "$evaluator_v" ]]; then
-      write_consensus "$repo" "$num" "$sha" "$engineer_v" "$evaluator_v" "$body" "$author_uuid" "$author_mention" "standard" "$trusted_body"
+      write_consensus "$repo" "$num" "$sha" "$engineer_v" "$evaluator_v" "$trusted_body" "$author_uuid" "$author_mention" "standard"
     elif [[ -n "$engineer_v" ]]; then
       log "  [need-evaluator] $pr_id (engineer=$engineer_v)"
-      dispatch_review_request "$repo" "$num" "$sha" "$body" "$EVALUATOR_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
+      dispatch_review_request "$repo" "$num" "$sha" "$trusted_body" "$EVALUATOR_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
     elif [[ -n "$evaluator_v" ]]; then
       log "  [need-engineer] $pr_id (evaluator=$evaluator_v peer=$peer_agent)"
-      dispatch_review_request "$repo" "$num" "$sha" "$body" "$peer_agent" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
+      dispatch_review_request "$repo" "$num" "$sha" "$trusted_body" "$peer_agent" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
     else
       log "  [need-engineer-first] $pr_id (peer=$peer_agent)"
-      dispatch_review_request "$repo" "$num" "$sha" "$body" "$peer_agent" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
+      dispatch_review_request "$repo" "$num" "$sha" "$trusted_body" "$peer_agent" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
     fi
   done <<<"$prs_raw"
 done <<<"$REPOS"
