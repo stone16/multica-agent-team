@@ -277,6 +277,41 @@ sentinel_verdicts_all() {
     || true
 }
 
+# Standard-mode lane verdict with per-comment discipline (mirrors the
+# pair-mode consensus parser). Given the per-comment base64 list of TRUSTED
+# comments, a lane name, and the SHA, returns the verdict from the LATEST
+# comment that carries EXACTLY ONE sentinel of this lane for the SHA AND ZERO
+# sentinels of the other lane for the SHA. Two independent reviews means two
+# DISTINCT comments: parsing the flattened trusted body would let one comment
+# stuffed with both lanes' sentinels satisfy both lanes from a single write.
+# A comment carrying both lanes' sentinels is logged and qualifies for
+# NEITHER lane; a comment with multiple sentinels of the same lane is not a
+# lane review either. Distinct-comment origin then holds by construction: a
+# qualifying comment can only ever carry its own lane's single sentinel.
+lane_verdict_from_comments() {
+  local b64s="$1" name="$2" sha="$3" pr_id="${4:-}"
+  local other="engineer-reviewed" b64 body own_cnt other_cnt v verdict=""
+  [[ "$name" == "engineer-reviewed" ]] && other="evaluator-reviewed"
+  while IFS= read -r b64; do
+    [[ -z "$b64" ]] && continue
+    body="$(decode_b64 "$b64")"
+    own_cnt="$(sentinel_verdicts_all "$body" "$name" "$sha" | grep -c . || true)"
+    (( own_cnt >= 1 )) || continue
+    other_cnt="$(sentinel_verdicts_all "$body" "$other" "$sha" | grep -c . || true)"
+    if (( other_cnt > 0 )); then
+      log "  [ignored] $pr_id: one trusted comment carries both lane sentinels for this SHA — counts for neither lane"
+      continue
+    fi
+    if [[ "$own_cnt" != "1" ]]; then
+      log "  [ignored] $pr_id: one comment carries $own_cnt $name sentinels for this SHA; standard mode requires exactly one per comment — comment not counted"
+      continue
+    fi
+    v="$(sentinel_verdict "$body" "$name" "$sha")"
+    [[ -n "$v" ]] && verdict="$v"
+  done <<<"$b64s"
+  printf '%s' "$verdict"
+}
+
 # Count distinct prior head SHAs that landed a non-approve consensus on this PR.
 # Feeds the ADVISORY iteration line in the CEO outcome comment; the CEO uses it
 # to decide between dispatching rework and escalating to the human.
@@ -592,11 +627,15 @@ strip_review_sentinel() {
 # lane's findings. In `engineer-pair` mode the comment must carry EXACTLY
 # one sentinel for this SHA, mirroring the per-comment pair-mode consensus
 # discipline: a comment stuffed with multiple sentinels is not a lane
-# review. Returns nonzero on a FAILED fetch — callers must not treat a
-# failure as an empty review body.
+# review. In `standard` mode the comment must carry exactly one sentinel of
+# THIS lane and ZERO sentinels of the other lane for this SHA — the same
+# qualification lane_verdict_from_comments applies to consensus, so verdict
+# and embedded evidence always come from the same class of records. Returns
+# nonzero on a FAILED fetch — callers must not treat a failure as an empty
+# review body.
 review_comment_body() {
   local repo="$1" num="$2" name="$3" sha="$4" idx="${5:--1}" mode="${6:-standard}"
-  local raw login b64 c_body s_cnt match_b64s="" n=0 pick target
+  local raw login b64 c_body s_cnt other_name o_cnt match_b64s="" n=0 pick target
 
   if ! raw=$(pr_comments_with_authors "$repo" "$num"); then
     return 1
@@ -607,10 +646,18 @@ review_comment_body() {
     c_body="$(decode_b64 "$b64")"
     s_cnt="$(sentinel_verdicts_all "$c_body" "$name" "$sha" | grep -c . || true)"
     (( s_cnt >= 1 )) || continue
-    if [[ "$mode" == "engineer-pair" && "$s_cnt" != "1" ]]; then
+    if [[ "$mode" == "engineer-pair" ]]; then
       # Pair mode requires exactly one sentinel per comment (matching the
       # consensus parser) — a multi-sentinel comment is never lane evidence.
-      continue
+      [[ "$s_cnt" == "1" ]] || continue
+    else
+      # Standard mode mirrors lane_verdict_from_comments: evidence must be a
+      # comment with exactly one sentinel of THIS lane and none of the other
+      # lane, so a both-lane stuffed comment is never selected as evidence.
+      other_name="engineer-reviewed"
+      [[ "$name" == "engineer-reviewed" ]] && other_name="evaluator-reviewed"
+      o_cnt="$(sentinel_verdicts_all "$c_body" "$other_name" "$sha" | grep -c . || true)"
+      [[ "$s_cnt" == "1" && "$o_cnt" == "0" ]] || continue
     fi
     match_b64s+="$b64"$'\n'
     n=$((n + 1))
@@ -634,7 +681,9 @@ review_comment_body() {
 # `&#058;`, capital-X hex `&#X3A;`, and every further variant all slip past
 # a fixed list. So the defense is GENERIC: the scheme name `mention` in any
 # letter case, followed by either a literal `:` or ANY entity-like sequence
-# (`&` + 1-8 chars of [#a-zA-Z0-9] + `;`), then `//`, is collapsed to the
+# (`&` + one or more chars of [#a-zA-Z0-9] + `;` — unbounded, so an
+# arbitrarily zero-padded payload like `&#00000000058;` cannot outgrow the
+# match), then `//`, is collapsed to the
 # single inert form `mention[:]//`. Anything that could decode into a colon
 # at Markdown render time is rewritten before it gets the chance;
 # already-neutralized `mention[:]//` does not match, so the rewrite is
@@ -643,7 +692,7 @@ review_comment_body() {
 # own routing mention lives in the script-authored header, never inside
 # neutralized content.
 neutralize_mentions() {
-  sed -E 's@[Mm][Ee][Nn][Tt][Ii][Oo][Nn](:|&[#a-zA-Z0-9]{1,8};)//@mention[:]//@g'
+  sed -E 's@[Mm][Ee][Nn][Tt][Ii][Oo][Nn](:|&[#a-zA-Z0-9]+;)//@mention[:]//@g'
 }
 
 post_review_outcome_comment() {
@@ -1138,8 +1187,13 @@ while IFS= read -r repo; do
       continue
     fi
 
-    engineer_v=$(sentinel_verdict "$trusted_body" "engineer-reviewed" "$sha")
-    evaluator_v=$(sentinel_verdict "$trusted_body" "evaluator-reviewed" "$sha")
+    # Standard mode reads each lane per-comment (never the flattened trusted
+    # body): a lane is satisfied only by a distinct comment carrying exactly
+    # that lane's single sentinel for this SHA. One comment stuffed with both
+    # lanes' sentinels counts for neither — two-independent-reviews requires
+    # two independent writes.
+    engineer_v=$(lane_verdict_from_comments "$trusted_b64s" "engineer-reviewed" "$sha" "$pr_id")
+    evaluator_v=$(lane_verdict_from_comments "$trusted_b64s" "evaluator-reviewed" "$sha" "$pr_id")
 
     if [[ -n "$engineer_v" && -n "$evaluator_v" ]]; then
       write_consensus "$repo" "$num" "$sha" "$engineer_v" "$evaluator_v" "$trusted_body" "$author_uuid" "$author_mention" "standard"
