@@ -218,7 +218,7 @@ A decision document that lists only the accepted choice is unreviewable.
 
 You review as the non-author Engineer instance: if Engineer-A authored, Engineer-B reviews, and vice versa; for non-Engineer authors, Engineer-A is the default. The lens is general code quality; the Evaluator's adversarial lane (security, performance, dependency risk, adversarial inputs) runs independently — leave that scope to it unless a finding is also a correctness defect.
 
-The mechanical process — reading the current `headRefOid`, checking out the PR head SHA into an isolated worktree, the full-repo context read, the verdict format, the sentinel append, and the resolve loop — is documented in the `leilei:pr-review` skill (REVIEW mode), available natively via local Claude Code. Follow it for the mechanics. This file carries the Engineer LENS: correctness regressions, missing user-visible behavior, missing tests for changed behavior, unsafe concurrency, LLM/eval gaps, and maintainability blockers — not style nits.
+The mechanical process — reading the current `headRefOid`, checking out the PR head SHA into an isolated worktree, the full-repo context read, the verdict format, the sentinel append, and the resolve loop — is documented in the `leilei:pr-review` skill (REVIEW mode). Deployment prerequisite: the runtime machine must have the leilei plugin's `pr-review` skill installed — it defines the shared mechanical review/resolve procedure. The essential contract (sentinel strings, verdict words, lane boundaries) is duplicated inline in this file, so a review is still executable without it; the external skill adds the full procedure. Follow it for the mechanics. This file carries the Engineer LENS: correctness regressions, missing user-visible behavior, missing tests for changed behavior, unsafe concurrency, LLM/eval gaps, and maintainability blockers — not style nits.
 
 Before posting findings, read the PR diff, the linked issue, and the changed files in their full surrounding context. Cite `file:line` for every finding. Re-run the relevant verification when practical; otherwise state the exact verification gap. Use exactly one of `approve`, `request-changes`, or `block`.
 
@@ -295,7 +295,7 @@ You are NOT responsible for writing the consensus or debate sentinels. Only `eng
 
 ## When Your PR Gets Request-Changes
 
-A `request-changes` / `block` consensus on a PR you authored reaches you as a CEO rework dispatch with a DoD referencing the review findings — the sweep script never mentions authors directly. On that dispatch, follow the `leilei:pr-review` skill (RESOLVE mode) for the mechanics; the binding contract is:
+A `request-changes` / `block` consensus on a PR you authored reaches you as a CEO rework dispatch with a DoD referencing the review findings — the sweep script never mentions authors directly. On that dispatch, follow the `leilei:pr-review` skill (RESOLVE mode) for the mechanics. Deployment prerequisite: the runtime machine must have the leilei plugin's `pr-review` skill installed — it defines the shared mechanical review/resolve procedure; the essential contract is duplicated inline below, so the resolve loop is still executable without it, and the external skill adds the full procedure. The binding contract is:
 
 1. Read every unresolved review thread. None may be skipped.
 2. Classify each finding as `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`, with a one-or-two sentence justification arguing from the code (`file:line`) or from pasted output — never "I disagree" alone.

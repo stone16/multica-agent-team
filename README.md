@@ -126,10 +126,10 @@ The review prompt follows the Claude Code review shape we want to emulate: revie
 
 Every PR — including documentation-only PRs — gets two independent reviews at the current head SHA; this is not a rotation:
 
-- **Engineer peer lane** — general code quality, carried by the Engineer instance that did NOT author the PR. If Engineer-A authored, Engineer-B reviews, and vice versa; for non-Engineer authors (PM, human, or an unmapped author), the default is Engineer-A. The author is read from the machine-parsed `Original author: [@AgentName](mention://agent/<uuid>)` line in the PR body, so instances can share one bot login without ever reviewing their own PR.
+- **Engineer peer lane** — general code quality, carried by the Engineer instance that did NOT author the PR. If Engineer-A authored, Engineer-B reviews, and vice versa; for non-Engineer authors (PM, human, or an unmapped author), the default is Engineer-A. The author is read from the machine-parsed `Original author: [@AgentName](mention://agent/<uuid>)` line in the PR body, so instances can share one bot login without ever reviewing their own PR. The line must carry exactly ONE agent mention: zero or multiple mentions make the author unparseable (logged), and the PR is treated as human-owned — this stops a crafted line with two mentions from resolving to conflicting identities and dodging the self-review guard.
 - **Evaluator adversarial lane** — security, performance, dependency risk, adversarial inputs.
 
-**Evaluator-authored PRs** are the exception: the adversarial lane never self-reviews. When the PR body's `Original author:` UUID matches `EVALUATOR_MENTION`, the sweep carries BOTH lanes with the two Engineer instances — Engineer-A takes the peer lane, then Engineer-B runs the adversarial checklist. Both write the `engineer-reviewed` sentinel (never `evaluator-reviewed`), and consensus for that PR accepts two `engineer-reviewed` sentinels from two distinct review comments as the two lanes (first = peer, second = adversarial). The review-request text carries the lane attribution, and the outcome comment labels the lanes explicitly.
+**Evaluator-authored PRs** are the exception: the adversarial lane never self-reviews. When the PR body's `Original author:` UUID matches `EVALUATOR_MENTION`, the sweep carries BOTH lanes with the two Engineer instances — Engineer-A takes the peer lane, then Engineer-B runs the adversarial checklist. Both write the `engineer-reviewed` sentinel (never `evaluator-reviewed`), and consensus for that PR requires two `engineer-reviewed` sentinels from two DISTINCT trusted review comments as the two lanes (first = peer, second = adversarial). The sweep parses per-comment: each counted comment must carry exactly one `engineer-reviewed` sentinel for the SHA, so a single comment stuffed with two sentinels satisfies neither lane (it is logged and ignored). The review-request text carries the lane attribution, and the outcome comment labels the lanes explicitly.
 
 The lenses differ, but the evidence bar is identical: check out the PR head SHA into an isolated Multica worktree for full-repo context, `file:line` findings, production-impacting issues first, explicit verification status, strict verdict word, and no sentinel without a real review. The lanes do not coordinate in advance; the script reconciles the two verdicts.
 
@@ -150,6 +150,7 @@ Both are required; the workflow's first step fails loud if either is missing.
 | `CEO_MENTION` | The ONLY mention the sweep ever emits, as `[@CEO](mention://agent/<uuid>)`. Required — every non-approve outcome routes here |
 | `ENGINEER_A_MENTION`, `ENGINEER_B_MENTION`, `EVALUATOR_MENTION` | Roster mention links in the same form. They map a PR body's `Original author:` UUID to a roster identity — that mapping picks the peer lane (the sweep never mentions authors). Required — the workflow's check step FAILS before running the sweep when any of them (or `CEO_MENTION`) is unset |
 | `ENGINEER_A_AGENT`, `ENGINEER_B_AGENT`, `EVALUATOR_AGENT`, `CEO_AGENT` | Multica assignee names; the script defaults to `Engineer-A` / `Engineer-B` / `Evaluator` / `CEO` when unset |
+| `TRUSTED_SENTINEL_AUTHORS` | GitHub logins (newline/space separated) whose PR comments may carry authoritative review sentinels. Defaults to the `GH_OWNER` login when unset — set it to the bot login(s) the agents comment through. Sentinels in comments from any other author are ignored with a log line, so arbitrary commenters on a public repo can never forge review state |
 | `PR_SWEEP_IGNORE` | Newline-separated repo names to exclude from the sweep. Kept as an Actions variable so private repo names never live in tracked files |
 
 Agent UUIDs and mention links are operational identity — never commit them.
@@ -164,6 +165,11 @@ After a review, each lane appends an HTML-comment sentinel to its PR review comm
 ```
 
 Both Engineer instances write `engineer-reviewed` — the sentinel is lane-scoped, not instance-scoped, so a re-review by the other instance stays comparable.
+
+Two hard rules gate every sentinel parse:
+
+- **Sentinel trust** — the sweep only honors sentinels found in comments whose GitHub author login is in `TRUSTED_SENTINEL_AUTHORS` (defaults to the `GH_OWNER` login). A sentinel-bearing comment from any other author is ignored with a log line; commenters cannot forge review state.
+- **Strict verdict whitelist** — the verdict must be exactly `approve`, `request-changes`, or `block`. A sentinel carrying anything else (e.g. `approved`) is malformed and is not a sentinel at all.
 
 When both lanes have written sentinels for the same SHA, the script writes one of:
 
@@ -180,7 +186,7 @@ A debate converges through the CEO resolution sentinel. After casting the decidi
 <!-- ceo-resolved: <head-sha> verdict: <approve|request-changes|block> -->
 ```
 
-The sweep then reconciles: debate + `ceo-resolved` for the SAME SHA → it writes the final consensus sentinel with the resolved verdict and finishes the PR (approve → the review issue is marked done; non-approve → the CEO already owns rework from the adjudication, so the sweep records the verdict and posts no new outcome comment). A debate without a `ceo-resolved` sentinel is logged as waiting for CEO adjudication and skipped — never treated as converged.
+The sweep then reconciles: debate + `ceo-resolved` for the SAME SHA → it writes the final consensus sentinel with the resolved verdict and finishes the PR (approve → the review issue is closed FIRST, and the terminal consensus sentinel is only written after a successful close; non-approve → the CEO already owns rework from the adjudication, so the sweep records the verdict and posts no new outcome comment). A debate without a `ceo-resolved` sentinel is logged as waiting for CEO adjudication and skipped — never treated as converged.
 
 Each PR gets exactly one Multica review issue. The PR URL is the logical idempotency key; the durable mapping is stored on that PR thread as:
 
@@ -188,11 +194,13 @@ Each PR gets exactly one Multica review issue. The PR URL is the logical idempot
 <!-- multica-pr-review-issue: <issue-id> -->
 ```
 
+The marker write is retried up to 3 times after issue creation; if it still fails, the sweep closes the just-created Multica issue again (compensating close) and logs the failure loudly — an unmarked live issue is never left behind silently for the next sweep to duplicate.
+
 Reviewer dispatch is serialized through that single issue: the peer Engineer lane reviews first, then the Evaluator lane (or the reverse if the Evaluator sentinel already exists). New commits append a new review-request comment to the same issue; the head SHA makes older comments stale.
 
 ### Outcome routing
 
-When both lanes have verdicts, the script reconciles and posts one Multica comment in the PR review issue with the PR URL, head commit, final verdict, both lane verdicts, the matching review bodies (sentinels stripped), and an `Action:` line. **Leader-only routing**: the script never @-mentions PR authors — every non-approve reconciled outcome mentions only `CEO_MENTION`, and the CEO dispatches rework:
+When both lanes have verdicts, the script reconciles and posts one Multica comment in the PR review issue with the PR URL, head commit, final verdict, both lane verdicts, the matching review bodies (sentinels stripped, and mention-neutralized: any `mention://` URI inside a reviewer body is rewritten to `mention&#58;//` so it renders but can never fire a live mention), and an `Action:` line. **Leader-only routing**: the script never @-mentions PR authors — every non-approve reconciled outcome mentions only `CEO_MENTION`, and the CEO dispatches rework:
 
 | `Action:` value | Recipient | When |
 |---|---|---|
@@ -201,13 +209,13 @@ When both lanes have verdicts, the script reconciles and posts one Multica comme
 
 Follow-up is discussion-first, not blind stale-marking: each finding gets a `will-fix` / `already-fixed` / `wont-fix` / `needs-discussion` reply, the thread stays unresolved until the parties agree, and a summary comment lands before resolution. The CEO never implements fixes itself — a `will-fix` from the CEO means a routed dispatch. Rework reaches the author only as a CEO delegation comment; the author then pushes fixes to the PR branch and the next sweep re-runs both lanes at the new head SHA.
 
-If both lanes approve, the script writes the consensus sentinel and marks the review issue `done` without involving the CEO. If the PR is closed or merged before approval, close the review issue manually; the sweep only enumerates open PRs.
+If both lanes approve, the script first marks the review issue `done`, then writes the consensus sentinel — the terminal sentinel is only written after a successful close, so a failed close logs a warning and is retried on the next sweep instead of being sealed behind a terminal sentinel. The CEO is not involved. If the PR is closed or merged before approval, close the review issue manually; the sweep only enumerates open PRs.
 
 Reviewer behavior is in `agents/engineer/skill.md` (peer lane) and `agents/evaluator/skill.md` (adversarial lane). Do not edit the sentinel format in only one place — change both, update `tests/pr-sweep.test.sh`, and re-sync to Multica via `scripts/sync-multica.sh`.
 
 ### Scope and exclusions
 
-The sweep enumerates **all non-archived** repos under `stone16/*`. To exclude a repo (personal experiment, third-party fork, separately-reviewed sub-team repo), add its name to the `PR_SWEEP_IGNORE` GitHub Actions variable, one repo name per line:
+The sweep enumerates **all non-archived** repos under `stone16/*` (up to 1000 repos and 1000 open PRs per repo). If either enumeration returns exactly its limit, the sweep treats it as saturated: it logs an `enumeration saturated` error and exits nonzero at the end of the run, so incomplete coverage always fails the workflow instead of silently skipping repos or PRs. To exclude a repo (personal experiment, third-party fork, separately-reviewed sub-team repo), add its name to the `PR_SWEEP_IGNORE` GitHub Actions variable, one repo name per line:
 
 ```
 twitter-chrome-extension

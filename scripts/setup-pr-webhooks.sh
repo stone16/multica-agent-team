@@ -50,6 +50,13 @@
 #   scripts/setup-pr-webhooks.sh --owner <name>  # dry run, one owner
 #                                                # (<name> must be in scope)
 #   scripts/setup-pr-webhooks.sh --apply         # execute
+#   scripts/setup-pr-webhooks.sh --allow-insecure-url
+#                                                # permit a plain http:// webhook
+#                                                # URL — local testing only; the
+#                                                # embedded bearer credential
+#                                                # travels unencrypted. Without
+#                                                # this flag, non-https URLs are
+#                                                # rejected.
 
 set -euo pipefail
 
@@ -67,10 +74,17 @@ usage() {
 
 APPLY=0
 ONLY_OWNER=""
+ALLOW_INSECURE_URL=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --apply)
       APPLY=1
+      shift
+      ;;
+    --allow-insecure-url)
+      # Local testing only: permits a plain http:// MULTICA_WEBHOOK_URL even
+      # though the embedded bearer credential then travels unencrypted.
+      ALLOW_INSECURE_URL=1
       shift
       ;;
     --owner)
@@ -138,10 +152,20 @@ if [[ -z "$SCOPE_RAW" ]]; then
   exit 1
 fi
 
+# The URL embeds a bearer credential, so plain http is a credential leak in
+# transit: hard-reject it unless --allow-insecure-url (local testing only)
+# was passed explicitly. The URL itself is never echoed here — not even in
+# the rejection message.
 case "$WEBHOOK_URL" in
   https://*) : ;;
   http://*)
-    log "warning: MULTICA_WEBHOOK_URL uses plain http — the embedded credential travels unencrypted."
+    if [[ "$ALLOW_INSECURE_URL" -eq 1 ]]; then
+      log "warning: MULTICA_WEBHOOK_URL uses plain http (--allow-insecure-url) — the embedded credential travels unencrypted. Local testing only."
+    else
+      log "error: MULTICA_WEBHOOK_URL uses plain http:// — the embedded bearer credential would travel unencrypted."
+      log "  Use an https:// URL. For local testing only, re-run with --allow-insecure-url."
+      exit 1
+    fi
     ;;
   *)
     die "MULTICA_WEBHOOK_URL does not look like an absolute http(s):// URL."

@@ -235,7 +235,7 @@ Apply both in every PR review. If the diff doesn't touch a checklist item's surf
 
 ## Review Verdict Format (PR review lane)
 
-The mechanical review process — head-SHA checkout into an isolated worktree, evidence bar, sentinel placement, and the resolve loop on the author side — is defined in the `leilei:pr-review` skill (REVIEW mode), available natively to the local Claude Code runtime. This file carries only the Evaluator lens: security, performance, dependency risk, and adversarial inputs.
+The mechanical review process — head-SHA checkout into an isolated worktree, evidence bar, sentinel placement, and the resolve loop on the author side — is defined in the `leilei:pr-review` skill (REVIEW mode). Deployment prerequisite: the runtime machine must have the leilei plugin's `pr-review` skill installed — it defines the shared mechanical review/resolve procedure. The essential contract (sentinel strings, verdict words, lane boundaries) is duplicated inline in this file, so a review is still executable without it; the external skill adds the full procedure. This file carries only the Evaluator lens: security, performance, dependency risk, and adversarial inputs.
 
 Use one of these three exactly. The first line MUST be `Verdict: <verdict>`.
 

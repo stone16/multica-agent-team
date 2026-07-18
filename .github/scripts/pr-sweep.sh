@@ -38,6 +38,23 @@ set -euo pipefail
 
 GH_OWNER="${GH_OWNER:-stone16}"
 
+# GitHub logins whose PR comments may carry authoritative review sentinels
+# (engineer-reviewed / evaluator-reviewed / ceo-resolved / consensus / debate).
+# Newline/space separated. Defaults to GH_OWNER — set it to the bot login(s)
+# the agents comment through. Sentinels in comments from any other author are
+# ignored with a log line: arbitrary commenters must never be able to forge
+# review state on a public repo.
+TRUSTED_SENTINEL_AUTHORS="${TRUSTED_SENTINEL_AUTHORS:-$GH_OWNER}"
+
+# Enumeration caps. Saturation (returned count == limit) is detected as a
+# backstop and fails the run at the end, so silent truncation can never make
+# the sweep quietly skip repos or PRs.
+REPO_LIST_LIMIT="${REPO_LIST_LIMIT:-1000}"
+PR_LIST_LIMIT="${PR_LIST_LIMIT:-1000}"
+
+# Seconds between retries of the durable PR-marker write after issue creation.
+MARKER_RETRY_DELAY="${PR_SWEEP_RETRY_DELAY:-2}"
+
 # Assignee names as Multica knows them (`multica issue ... --assignee <name>`).
 ENGINEER_A_AGENT="${ENGINEER_A_AGENT:-Engineer-A}"
 ENGINEER_B_AGENT="${ENGINEER_B_AGENT:-Engineer-B}"
@@ -99,12 +116,12 @@ is_repo_ignored() {
 # ---------- GitHub helpers ----------
 
 list_repos() {
-  gh repo list "$GH_OWNER" --limit 200 --no-archived --json name --jq '.[].name'
+  gh repo list "$GH_OWNER" --limit "$REPO_LIST_LIMIT" --no-archived --json name --jq '.[].name'
 }
 
 list_open_prs() {
   # Outputs tab-separated: number<TAB>headRefOid<TAB>authorLogin
-  gh pr list --repo "$GH_OWNER/$1" --state open --limit 100 \
+  gh pr list --repo "$GH_OWNER/$1" --state open --limit "$PR_LIST_LIMIT" \
     --json number,headRefOid,author \
     --jq '.[] | "\(.number)\t\(.headRefOid)\t\(.author.login)"'
 }
@@ -116,9 +133,50 @@ list_open_prs() {
 # and skips that PR for this sweep — state is re-derived from the PR thread
 # next run, so skipping is safe by design. No decision (peer-lane pick, issue
 # dispatch, consensus, final sentinel) may ever be made from error-empty data.
-pr_comments_body() {
+#
+# pr_comments_with_authors outputs one line per comment:
+#   <author-login><TAB><base64-encoded-body>
+# The author login is what sentinel trust keys on (TRUSTED_SENTINEL_AUTHORS);
+# base64 keeps arbitrary multi-line bodies one-record-per-line.
+pr_comments_with_authors() {
   gh pr view "$2" --repo "$GH_OWNER/$1" --json comments \
-    --jq '.comments[].body' 2>/dev/null
+    --jq '.comments[] | "\(.author.login // "")\t\(.body // "" | @base64)"' 2>/dev/null
+}
+
+decode_b64() {
+  printf '%s' "$1" | base64 -d 2>/dev/null || true
+}
+
+# A GitHub login is trusted to carry review sentinels only when listed in
+# TRUSTED_SENTINEL_AUTHORS (newline/space separated).
+is_trusted_author() {
+  local login="$1"
+  [[ -n "$login" ]] || return 1
+  printf '%s\n' "$TRUSTED_SENTINEL_AUTHORS" \
+    | tr -s '[:space:]' '\n' \
+    | grep -Fxq -- "$login"
+}
+
+# Detects any sweep-protocol sentinel in a comment body — used only to log
+# when an untrusted comment tried to carry one.
+comment_has_any_sentinel() {
+  printf '%s' "$1" \
+    | grep -qE '<!--[[:space:]]*(engineer-reviewed|evaluator-reviewed|ceo-resolved|consensus|debate):'
+}
+
+# Flattened bodies of ALL comments regardless of author. Used only where
+# sentinel authority is not required (issue-marker lookup fallback) — every
+# sentinel decision must read trusted-author comments instead.
+pr_comments_body() {
+  local raw login b64
+  if ! raw=$(pr_comments_with_authors "$1" "$2"); then
+    return 1
+  fi
+  while IFS=$'\t' read -r login b64; do
+    [[ -z "$login" && -z "$b64" ]] && continue
+    decode_b64 "$b64"
+    printf '\n'
+  done <<<"$raw"
 }
 
 pr_body() {
@@ -165,10 +223,13 @@ sentinel_verdict() {
   # case (most PRs have no review yet). The `|| true` keeps the function
   # returning 0 with empty stdout so callers using `var=$(...)` under
   # set -e -o pipefail don't blow up.
+  # The verdict class is a strict whitelist — a sentinel carrying anything
+  # other than approve|request-changes|block is malformed and is NOT a
+  # sentinel (e.g. `approved` never matches).
   printf '%s' "$body" \
-    | grep -oE "<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+[[:space:]]*-->" \
+    | grep -oE "<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*(approve|request-changes|block)[[:space:]]*-->" \
     | tail -1 \
-    | sed -E "s/.*verdict:[[:space:]]*([a-z-]+).*/\1/" \
+    | sed -E "s/.*verdict:[[:space:]]*(approve|request-changes|block).*/\1/" \
     || true
 }
 
@@ -177,8 +238,10 @@ sentinel_verdict() {
 # (`<!-- consensus: <sha> verdict: <v> -->`) so quoted prose cannot match.
 has_consensus_sentinel() {
   local body="$1" sha="$2"
+  # Same strict verdict whitelist as sentinel_verdict: a malformed verdict is
+  # not a consensus sentinel.
   printf '%s' "$body" \
-    | grep -qE "<!--[[:space:]]*consensus:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+[[:space:]]*-->"
+    | grep -qE "<!--[[:space:]]*consensus:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*(approve|request-changes|block)[[:space:]]*-->"
 }
 
 # The debate sentinel is NOT terminal: it means the lanes disagreed and the
@@ -204,8 +267,8 @@ has_debate_sentinel() {
 sentinel_verdicts_all() {
   local body="$1" name="$2" sha="$3"
   printf '%s' "$body" \
-    | grep -oE "<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+[[:space:]]*-->" \
-    | sed -E "s/.*verdict:[[:space:]]*([a-z-]+).*/\1/" \
+    | grep -oE "<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*(approve|request-changes|block)[[:space:]]*-->" \
+    | sed -E "s/.*verdict:[[:space:]]*(approve|request-changes|block).*/\1/" \
     || true
 }
 
@@ -246,15 +309,27 @@ mention_agent_uuid() {
 # the author. Returns empty if the line is absent or carries no agent
 # mention; callers fall back to the Engineer-A peer default, and the CEO
 # outcome comment notes that the author could not be identified.
+# The line must carry EXACTLY ONE `mention://agent/` occurrence: with two
+# mentions the greedy-UUID extraction and the first-markdown extraction would
+# resolve to conflicting identities, letting a crafted line dodge the
+# self-review guard. Zero or multiple mentions → unparseable (human-owned
+# path), with a log line saying why.
 original_author_id_from_body() {
-  local body="$1"
+  local body="$1" line mention_count
   # `|| true`: grep exits 1 when the line is absent (human-authored PRs);
   # keep the function at rc 0 with empty stdout so top-level `var=$(...)`
   # assignments under set -e -o pipefail don't abort the sweep.
-  printf '%s\n' "$body" \
-    | grep -E '^[[:space:]]*Original author:' \
+  line=$(printf '%s\n' "$body" | grep -E '^[[:space:]]*Original author:' | head -1 || true)
+  [[ -n "$line" ]] || return 0
+  mention_count=$(printf '%s\n' "$line" \
+    | grep -oE 'mention://agent/[0-9a-fA-F-]{36}' \
+    | wc -l | tr -d ' \n' || true)
+  if [[ "$mention_count" != "1" ]]; then
+    log "    [warn] Original author line carries $mention_count agent mentions (expected exactly 1); treating author as unparseable (human-owned path)"
+    return 0
+  fi
+  printf '%s\n' "$line" \
     | sed -nE 's/.*mention:\/\/agent\/([0-9a-fA-F-]{36}).*/\1/p' \
-    | head -1 \
     || true
 }
 
@@ -263,10 +338,18 @@ original_author_id_from_body() {
 # `- Original author:` line in the CEO outcome comment (wrapped in backticks
 # there so it never acts as a live mention — leader-only routing holds).
 # Returns empty when the line is absent or its mention markdown is unparseable.
+# Same exactly-one-mention rule as original_author_id_from_body: zero or
+# multiple mentions on the line → empty (author unknown), so the two
+# extraction paths can never disagree about the author's identity.
 original_author_mention_from_body() {
-  local body="$1"
-  printf '%s\n' "$body" \
-    | grep -E '^[[:space:]]*Original author:' \
+  local body="$1" line mention_count
+  line=$(printf '%s\n' "$body" | grep -E '^[[:space:]]*Original author:' | head -1 || true)
+  [[ -n "$line" ]] || return 0
+  mention_count=$(printf '%s\n' "$line" \
+    | grep -oE 'mention://agent/[0-9a-fA-F-]{36}' \
+    | wc -l | tr -d ' \n' || true)
+  [[ "$mention_count" == "1" ]] || return 0
+  printf '%s\n' "$line" \
     | grep -oE '\[@[^]]+\]\(mention://agent/[0-9a-fA-F-]{36}\)' \
     | head -1 \
     || true
@@ -425,8 +508,30 @@ create_review_issue() {
   issue_id="$(printf '%s' "$created" | json_id)"
   [[ -n "$issue_id" ]] || return 1
 
-  if ! post_pr_comment "$repo" "$num" "$(review_issue_marker "$issue_id")" >/dev/null; then
-    log "    [warn] review issue marker was not written for $GH_OWNER/$repo#$num; duplicate prevention may retry"
+  # The durable `<!-- multica-pr-review-issue: id -->` marker on the PR is the
+  # only thing preventing the next sweep from duplicating this issue. Retry
+  # the write; if it still fails, compensate by closing the just-created
+  # issue so an unmarked live issue is never left behind silently.
+  local attempt marker_ok=0
+  for attempt in 1 2 3; do
+    if post_pr_comment "$repo" "$num" "$(review_issue_marker "$issue_id")" >/dev/null; then
+      marker_ok=1
+      break
+    fi
+    log "    [warn] review issue marker write attempt $attempt/3 failed for $GH_OWNER/$repo#$num"
+    if (( attempt < 3 )); then
+      sleep "$MARKER_RETRY_DELAY"
+    fi
+  done
+
+  if (( ! marker_ok )); then
+    log "    [error] review issue marker could not be written for $GH_OWNER/$repo#$num after 3 attempts; the next sweep would duplicate issue $issue_id"
+    if multica issue update "$issue_id" --status done >/dev/null 2>&1; then
+      log "    [error] compensating close applied: orphan review issue $issue_id closed; the next sweep will recreate and mark it"
+    else
+      log "    [error] compensating close FAILED: review issue $issue_id is live but unmarked on $GH_OWNER/$repo#$num — manual cleanup required"
+    fi
+    return 1
   fi
 
   printf '%s\n' "$issue_id"
@@ -453,17 +558,41 @@ strip_review_sentinel() {
 # Fetch one lane's review comment body (sentinel stripped). `idx` selects
 # which matching comment (-1 = last, -2 = second-to-last; the latter is used
 # for the peer review on Evaluator-authored PRs where both lanes write
-# `engineer-reviewed`). Returns nonzero on a FAILED fetch — callers must not
-# treat a failure as an empty review body.
+# `engineer-reviewed`). Only comments from TRUSTED_SENTINEL_AUTHORS are
+# considered, matching the sentinel-trust rule. Returns nonzero on a FAILED
+# fetch — callers must not treat a failure as an empty review body.
 review_comment_body() {
   local repo="$1" num="$2" name="$3" sha="$4" idx="${5:--1}"
-  local jq_filter raw
-  jq_filter="[.comments[] | select(.body | contains(\"${name}: ${sha}\")) | .body][${idx}] // \"\""
+  local raw login b64 c_body match_b64s="" n=0 pick target
 
-  if ! raw=$(gh pr view "$num" --repo "$GH_OWNER/$repo" --json comments --jq "$jq_filter" 2>/dev/null); then
+  if ! raw=$(pr_comments_with_authors "$repo" "$num"); then
     return 1
   fi
-  printf '%s' "$raw" | strip_review_sentinel "$name" "$sha"
+  while IFS=$'\t' read -r login b64; do
+    [[ -z "$login" && -z "$b64" ]] && continue
+    is_trusted_author "$login" || continue
+    c_body="$(decode_b64 "$b64")"
+    if printf '%s' "$c_body" | grep -Fq -- "${name}: ${sha}"; then
+      match_b64s+="$b64"$'\n'
+      n=$((n + 1))
+    fi
+  done <<<"$raw"
+
+  (( n > 0 )) || return 0
+  pick=$((n + 1 + idx)) # idx -1 → last match, -2 → second-to-last (1-based)
+  (( pick >= 1 )) || return 0
+  target="$(printf '%s' "$match_b64s" | sed -n "${pick}p")"
+  [[ -n "$target" ]] || return 0
+  decode_b64 "$target" | strip_review_sentinel "$name" "$sha"
+}
+
+# Neutralize agent-mention URIs inside third-party (reviewer-authored)
+# content before embedding it in a Multica comment: `mention://` becomes
+# `mention&#58;//`, which renders readably but can never fire a live mention.
+# Leader-only routing depends on this — the CEO's own routing mention lives
+# in the script-authored header, never inside neutralized content.
+neutralize_mentions() {
+  sed 's|mention://|mention\&#58;//|g'
 }
 
 post_review_outcome_comment() {
@@ -502,6 +631,12 @@ post_review_outcome_comment() {
     PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
     return 1
   fi
+
+  # Reviewer bodies are embedded verbatim below — defang any mention:// URI
+  # they carry so an injected `[@Name](mention://agent/<uuid>)` cannot fire a
+  # live mention and break leader-only routing.
+  engineer_body="$(printf '%s' "$engineer_body" | neutralize_mentions)"
+  evaluator_body="$(printf '%s' "$evaluator_body" | neutralize_mentions)"
 
   # Author identity for the CEO's rework dispatch. The mention markdown is
   # wrapped in backticks so this line stays informational — the sweep never
@@ -679,6 +814,9 @@ dispatch_review_outcome() {
   return 0
 }
 
+# Returns nonzero when the close was attempted and FAILED — callers gate the
+# terminal consensus sentinel on this, so a failed close is always retried by
+# the next sweep instead of being sealed behind a terminal sentinel.
 close_review_issue_if_known() {
   local repo="$1" num="$2" sha="$3" comments="$4"
   local issue_id
@@ -688,7 +826,8 @@ close_review_issue_if_known() {
   if multica issue update "$issue_id" --status done >/dev/null 2>&1; then
     log "    review-issue=done $issue_id $GH_OWNER/$repo#$num@$sha"
   else
-    log "    [warn] review issue close failed for $issue_id (continuing)"
+    log "    [warn] close failed for review issue $issue_id ($GH_OWNER/$repo#$num@$sha); no terminal sentinel written — retry next sweep"
+    return 1
   fi
 }
 
@@ -701,7 +840,7 @@ close_review_issue_if_known() {
 #                           iteration line lets the CEO enforce the cap)
 #   approve + approve     → close the PR's review issue
 write_consensus() {
-  local repo="$1" num="$2" sha="$3" engineer="$4" evaluator="$5" comments="${6:-}" author_uuid="${7:-}" author_mention="${8:-}" lane_mode="${9:-standard}"
+  local repo="$1" num="$2" sha="$3" engineer="$4" evaluator="$5" comments="${6:-}" author_uuid="${7:-}" author_mention="${8:-}" lane_mode="${9:-standard}" trusted="${10:-}"
   local peer_lane_label="Engineer (peer lane)" adv_lane_label="Evaluator (adversarial lane)"
   if [[ "$lane_mode" == "engineer-pair" ]]; then
     adv_lane_label="Engineer (adversarial lane — Evaluator-authored PR)"
@@ -713,13 +852,21 @@ write_consensus() {
       return 0
     fi
   fi
+  # Sentinel-derived state (the iteration counter) reads only trusted-author
+  # comments; `comments` (all authors) serves the issue-marker lookup only.
+  [[ -n "$trusted" ]] || trusted="$comments"
 
   if [[ "$engineer" == "$evaluator" ]]; then
     if [[ "$engineer" == "approve" ]]; then
-      close_review_issue_if_known "$repo" "$num" "$sha" "$comments"
+      # Close the review issue FIRST. The terminal consensus sentinel is only
+      # written after a successful close — a consensus-then-failed-close
+      # would be terminal forever with the issue stuck open.
+      if ! close_review_issue_if_known "$repo" "$num" "$sha" "$comments"; then
+        return 0
+      fi
     else
       local iter reason
-      iter="$(iteration_count "$comments")"
+      iter="$(iteration_count "$trusted")"
       : "${iter:=0}"
 
       reason=""
@@ -760,7 +907,17 @@ write_consensus() {
 # ---------- Main ----------
 
 REPOS=$(list_repos)
-log "[scan] enumerated $(echo "$REPOS" | wc -l | tr -d ' ') repos under $GH_OWNER/"
+REPO_COUNT=$(printf '%s\n' "$REPOS" | grep -c . || true)
+log "[scan] enumerated $REPO_COUNT repos under $GH_OWNER/"
+
+# Saturation backstop: a result count equal to the enumeration limit almost
+# certainly means truncation. Flag it and fail the run at the end so
+# incomplete coverage is never silent.
+ENUMERATION_SATURATED=0
+if (( REPO_COUNT >= REPO_LIST_LIMIT )); then
+  log "[error] enumeration saturated: repo list returned $REPO_COUNT results at limit $REPO_LIST_LIMIT; repo coverage is incomplete"
+  ENUMERATION_SATURATED=1
+fi
 
 REPOS_OK=0
 REPOS_ERRORED=0
@@ -788,6 +945,12 @@ while IFS= read -r repo; do
     continue
   fi
 
+  pr_count=$(printf '%s\n' "$prs_raw" | grep -c . || true)
+  if (( pr_count >= PR_LIST_LIMIT )); then
+    log "[error] enumeration saturated: PR list for $repo returned $pr_count results at limit $PR_LIST_LIMIT; PR coverage is incomplete"
+    ENUMERATION_SATURATED=1
+  fi
+
   log "[scan] $repo"
   # NOTE: there is deliberately no GitHub-login self-review skip here. Agent
   # identity comes from the PR body's `Original author:` line (instances can
@@ -800,21 +963,40 @@ while IFS= read -r repo; do
 
     # A failed read is never treated as empty data — skip the PR for this
     # sweep instead (state re-derives from the PR thread next run).
-    if ! body=$(pr_comments_body "$repo" "$num"); then
+    if ! comments_raw=$(pr_comments_with_authors "$repo" "$num"); then
       log "  [warn] fetch failed for PR comments on $pr_id; skipping this sweep"
       PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
       continue
     fi
 
-    if has_consensus_sentinel "$body" "$sha"; then
+    # Split the thread by sentinel trust: `body` (all comments) serves only
+    # the multica-pr-review-issue marker lookup; every sentinel decision
+    # reads `trusted_body` (or the per-comment list `trusted_b64s`), so a
+    # comment from an arbitrary GitHub user can never forge review state.
+    body=""
+    trusted_body=""
+    trusted_b64s=""
+    while IFS=$'\t' read -r c_login c_b64; do
+      [[ -z "$c_login" && -z "$c_b64" ]] && continue
+      c_body="$(decode_b64 "$c_b64")"
+      body+="$c_body"$'\n'
+      if is_trusted_author "$c_login"; then
+        trusted_body+="$c_body"$'\n'
+        trusted_b64s+="$c_b64"$'\n'
+      elif comment_has_any_sentinel "$c_body"; then
+        log "  [ignored] $pr_id: sentinel-bearing comment by untrusted author '${c_login:-<unknown>}' (not in TRUSTED_SENTINEL_AUTHORS) — sentinel not honored"
+      fi
+    done <<<"$comments_raw"
+
+    if has_consensus_sentinel "$trusted_body" "$sha"; then
       log "  [done] $pr_id (consensus already at this SHA)"
       continue
     fi
 
-    if has_debate_sentinel "$body" "$sha"; then
+    if has_debate_sentinel "$trusted_body" "$sha"; then
       # A debate is not terminal — it converges only via the CEO resolution
       # sentinel `<!-- ceo-resolved: <sha> verdict: <...> -->` on the PR.
-      resolved_v=$(sentinel_verdict "$body" "ceo-resolved" "$sha")
+      resolved_v=$(sentinel_verdict "$trusted_body" "ceo-resolved" "$sha")
       if [[ -z "$resolved_v" ]]; then
         log "  [waiting] $pr_id (debate open — waiting for CEO adjudication)"
         continue
@@ -827,7 +1009,11 @@ while IFS= read -r repo; do
           ;;
       esac
       if [[ "$resolved_v" == "approve" ]]; then
-        close_review_issue_if_known "$repo" "$num" "$sha" "$body"
+        # Close FIRST; the terminal consensus sentinel is only written after
+        # a successful close (retry next sweep otherwise).
+        if ! close_review_issue_if_known "$repo" "$num" "$sha" "$body"; then
+          continue
+        fi
       fi
       # Non-approve: the CEO already owns rework from the adjudication —
       # record the resolved verdict and stop. No new outcome comment.
@@ -857,15 +1043,33 @@ while IFS= read -r repo; do
       # Engineer-A, adversarial checklist: Engineer-B); consensus accepts two
       # `engineer-reviewed` sentinels from two distinct review comments as
       # the two lanes (first = peer, second = adversarial).
-      eng_verdicts=$(sentinel_verdicts_all "$body" "engineer-reviewed" "$sha")
+      # Pair mode requires two DISTINCT trusted comments, each carrying
+      # exactly one engineer-reviewed sentinel for this SHA. A single comment
+      # stuffed with two sentinels satisfies neither lane — parse per-comment,
+      # never a flattened blob.
+      pair_verdicts=""
+      while IFS= read -r t_b64; do
+        [[ -z "$t_b64" ]] && continue
+        t_body="$(decode_b64 "$t_b64")"
+        t_all=$(sentinel_verdicts_all "$t_body" "engineer-reviewed" "$sha")
+        [[ -z "$t_all" ]] && continue
+        t_cnt=$(printf '%s\n' "$t_all" | grep -c . || true)
+        if [[ "$t_cnt" == "1" ]]; then
+          pair_verdicts+="$t_all"$'\n'
+        else
+          log "  [ignored] $pr_id: one comment carries $t_cnt engineer-reviewed sentinels for this SHA; pair mode requires exactly one per comment — comment not counted"
+        fi
+      done <<<"$trusted_b64s"
+
       eng_count=0
-      [[ -n "$eng_verdicts" ]] && eng_count=$(printf '%s\n' "$eng_verdicts" | grep -c .)
+      [[ -n "$pair_verdicts" ]] && eng_count=$(printf '%s' "$pair_verdicts" | grep -c .)
       if (( eng_count >= 2 )); then
-        v_peer=$(printf '%s\n' "$eng_verdicts" | sed -n '1p')
-        v_adv=$(printf '%s\n' "$eng_verdicts" | sed -n '2p')
-        write_consensus "$repo" "$num" "$sha" "$v_peer" "$v_adv" "$body" "$author_uuid" "$author_mention" "engineer-pair"
+        v_peer=$(printf '%s' "$pair_verdicts" | sed -n '1p')
+        v_adv=$(printf '%s' "$pair_verdicts" | sed -n '2p')
+        write_consensus "$repo" "$num" "$sha" "$v_peer" "$v_adv" "$body" "$author_uuid" "$author_mention" "engineer-pair" "$trusted_body"
       elif (( eng_count == 1 )); then
-        log "  [need-adversarial-engineer] $pr_id (evaluator-authored; first engineer verdict=$eng_verdicts)"
+        first_v=$(printf '%s' "$pair_verdicts" | sed -n '1p')
+        log "  [need-adversarial-engineer] $pr_id (evaluator-authored; first engineer verdict=$first_v)"
         dispatch_review_request "$repo" "$num" "$sha" "$body" "$ENGINEER_B_AGENT" "adversarial-engineer" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
       else
         log "  [need-engineer-first] $pr_id (evaluator-authored; peer=$ENGINEER_A_AGENT)"
@@ -874,11 +1078,11 @@ while IFS= read -r repo; do
       continue
     fi
 
-    engineer_v=$(sentinel_verdict "$body" "engineer-reviewed" "$sha")
-    evaluator_v=$(sentinel_verdict "$body" "evaluator-reviewed" "$sha")
+    engineer_v=$(sentinel_verdict "$trusted_body" "engineer-reviewed" "$sha")
+    evaluator_v=$(sentinel_verdict "$trusted_body" "evaluator-reviewed" "$sha")
 
     if [[ -n "$engineer_v" && -n "$evaluator_v" ]]; then
-      write_consensus "$repo" "$num" "$sha" "$engineer_v" "$evaluator_v" "$body" "$author_uuid" "$author_mention"
+      write_consensus "$repo" "$num" "$sha" "$engineer_v" "$evaluator_v" "$body" "$author_uuid" "$author_mention" "standard" "$trusted_body"
     elif [[ -n "$engineer_v" ]]; then
       log "  [need-evaluator] $pr_id (engineer=$engineer_v)"
       dispatch_review_request "$repo" "$num" "$sha" "$body" "$EVALUATOR_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
@@ -894,3 +1098,8 @@ done <<<"$REPOS"
 
 log "[summary] repos_ok=$REPOS_OK repos_errored=$REPOS_ERRORED prs_seen=$PRS_TOTAL prs_fetch_failed=$PRS_FETCH_FAILED"
 log "[done] sweep complete: review_requests=$REVIEWS_REQUESTED"
+
+if (( ENUMERATION_SATURATED )); then
+  log "[error] sweep incomplete: enumeration saturated — some repos or PRs were not swept; failing the run"
+  exit 1
+fi

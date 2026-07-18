@@ -6,12 +6,18 @@ Originating Multica issue: [STO-NNN](mention://issue/<uuid>)
 Original author: [@AgentName](mention://agent/<uuid>)
 
 <!--
-Both lines above are machine-parsed by .github/scripts/pr-sweep.sh — keep the exact
-line prefixes and the mention://issue/<uuid> / mention://agent/<uuid> link forms.
-The originating-issue line names the Multica issue this PR closes. The original-author
-line names the agent that opened the PR; on request-changes consensus the sweep routes
-feedback back to that agent for up to 3 iterations before escalating to a human.
-Human-authored PRs may omit the author line (the loop then escalates directly to the
+Keep the exact line prefixes and the mention://issue/<uuid> / mention://agent/<uuid>
+link forms. The originating-issue line names the Multica issue this PR closes. It is a
+required traceability convention for every PR — free text like "closes #NNN" does not
+satisfy it — but the sweep does NOT parse it; reviewers and the CEO read it by hand.
+The original-author line names the agent that opened the PR and is the only
+machine-parsed preamble line: .github/scripts/pr-sweep.sh extracts the agent UUID to
+pick the peer review lane (the Engineer instance that did not author reviews) and to
+give the CEO author context. The sweep never routes rework to the author — on a
+non-approve consensus it posts a ceo-followup comment, and on lane disagreement a
+ceo-debate comment; the CEO dispatches rework, with an advisory cap of 3 iterations
+before escalating to a human. Required for agent-authored PRs; human-authored PRs may
+omit it (the peer lane then defaults to Engineer-A, and escalation still goes to the
 CEO via CEO_MENTION).
 -->
 

@@ -164,16 +164,21 @@ agent_targets_for() {
 
 # ---------- JSON lookups (read-only, against the cached list output) ----------
 
-# Prints "<id>\t<name>" for the skill whose name matches (case-insensitive),
-# or nothing when absent.
+# Prints "<id>\t<name>" for the skill whose name EXACTLY matches the resolved
+# name (case-insensitive), or nothing when absent. Exact-match only, no
+# alternate-name fallback: when SYNC_SKILL_<ROLE> is set, matching anything
+# other than that override (e.g. the default "<Role> Skill" name) would
+# silently update the WRONG remote skill. An absent name falls through to the
+# create path in sync_skill. The default-name convention applies only when no
+# override is configured, and is resolved in skill_name_for — not here.
 lookup_skill() {
-  python3 - "$SKILLS_JSON" "$1" "$2" << 'PY'
+  python3 - "$SKILLS_JSON" "$1" << 'PY'
 import json, sys
 skills = json.load(open(sys.argv[1]))
-want = {sys.argv[2].strip().lower(), f"{sys.argv[3].strip().lower()} skill"}
+want = sys.argv[2].strip().lower()
 for s in skills:
     name = (s.get("name") or "").strip()
-    if name.lower() in want:
+    if name.lower() == want:
         print(f'{s["id"]}\t{name}')
         break
 PY
@@ -244,8 +249,11 @@ sync_skill() {
     return 0
   fi
 
+  # Exact-match lookup on the resolved name only. With SYNC_SKILL_<ROLE> set,
+  # an absent override name means CREATE under that name — never fall back to
+  # updating a skill under the default "<Display> Skill" name.
   name="$(skill_name_for "$role")"
-  match="$(lookup_skill "$name" "$role")"
+  match="$(lookup_skill "$name")"
 
   if [[ -z "$match" ]]; then
     log "[$role] skill '$name' not found on server — create"

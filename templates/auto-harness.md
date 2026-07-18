@@ -95,26 +95,50 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
    - If `status: draft` → post `[auto-harness: spec-not-ready]` comment and exit.
    - Otherwise treat as approved.
 
-2. Parse every `### Checkpoint NN: <title>` header. For each, create a child issue:
+2. Parse every `### Checkpoint NN: <title>` header. **Do NOT create or assign
+   child issues yourself** — issue creation and assignment are CEO-owned
+   dispatch under the constitution's DoD Dispatch Protocol. Instead, return a
+   checkpoint PLAN in your delivery comment on the parent issue:
+
+   ```
+   [auto-harness: checkpoint-plan]
+
+   Spec: <repo>/.harness/<task-id>/spec.md
+   Proposed children (for CEO dispatch):
+
+   - cp-01 "<checkpoint title>"
+     body: <the checkpoint's `#### Scope`, `#### Acceptance Criteria`, and
+       `#### Verification Commands` inlined verbatim from the spec — the
+       child agent must get self-contained context>
+     suggested dod:
+       outcome: <one sentence: what state counts as this checkpoint done>
+       evidence: <what proof must be attached: test output / screenshots / links>
+       verification: self | evaluator | human
+       max_rounds: 2
+   - cp-02 ...
+   ```
+
+   Suggested assignees are advisory: every implementation checkpoint goes to
+   an Engineer instance (Engineer-A or Engineer-B — instance-neutral; either
+   takes fresh work). Vertical tiers are abolished; do not route by perceived
+   difficulty.
+
+3. The **CEO** creates and dispatches every child issue from that plan:
 
    ```
    multica issue create \
      --title "[harness:cp-NN] <checkpoint title>" \
      --description-stdin \
      --parent <parent-issue-id> \
-     --assignee-id <role agent UUID per spec checkpoint type>
+     --assignee-id <Engineer instance UUID>
    multica issue label add <child-id> <harness:cp label-id>
    ```
 
-   The description body MUST inline the checkpoint's `#### Scope`,
-   `#### Acceptance Criteria`, and `#### Verification Commands` verbatim from
-   the spec — the child agent gets self-contained context.
-
-   Assignee selection: every implementation checkpoint goes to an Engineer
-   instance (Engineer-A or Engineer-B — instance-neutral; either takes fresh
-   work). Vertical tiers are abolished; do not route by perceived difficulty.
-
-3. Post the dispatch comment on the parent:
+   Every dispatch carries an inline `dod:` block
+   (`outcome` / `evidence` / `verification` / `max_rounds`) per the DoD
+   Dispatch Protocol — the CEO may adjust the suggested fields, but no child
+   issue is dispatched without one. The CEO then posts the dispatch comment
+   on the parent:
 
    ```
    [auto-harness: dispatch]
@@ -128,12 +152,30 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
    I will re-check this thread after all child issues close.
    ```
 
-4. Set parent status `in_review`. Exit silently.
+4. After posting the checkpoint plan, set parent status `in_review`. Exit
+   silently; dispatch is the CEO's move, not yours.
 
 ### E2E Dispatch (after every checkpoint child closes)
 
 When the parent agent re-runs and detects every `harness:cp` child issue is
-closed (`done` or `in_review`), create exactly one E2E child:
+closed (`done` or `in_review`), propose exactly one E2E child in a comment on
+the parent — do not create it yourself:
+
+```
+[auto-harness: e2e-plan]
+
+Proposed child (for CEO dispatch): [harness:e2e] End-to-end verification for <parent title>
+suggested dod:
+  outcome: parent spec's `## Verification` commands re-run holistically and
+    the user-visible golden path exercised end-to-end
+  evidence: command output and golden-path evidence per the Engineer's
+    `## Verification Matrix` and `## AI-Aware Engineering` rules
+  verification: evaluator
+  max_rounds: 2
+```
+
+The **CEO** creates the child issue and dispatches it with an inline `dod:`
+block (`outcome` / `evidence` / `verification` / `max_rounds`):
 
 ```
 multica issue create \
@@ -146,12 +188,6 @@ multica issue label add <e2e-id> <harness:e2e label-id>
 
 E2E owner is an **Engineer instance** (instance-neutral — not the Evaluator; the
 Evaluator reviews behavior afterward, but E2E is an Engineer responsibility).
-
-The description must instruct the assignee to:
-- Re-run the parent spec's `## Verification` commands holistically.
-- Exercise the user-visible golden path end-to-end.
-- Post evidence per the Engineer's `## Verification Matrix` and
-  `## AI-Aware Engineering` rules.
 
 ### Retro (after E2E child closes)
 
