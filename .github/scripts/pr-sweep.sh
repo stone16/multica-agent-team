@@ -569,11 +569,19 @@ strip_review_sentinel() {
 # which matching comment (-1 = last, -2 = second-to-last; the latter is used
 # for the peer review on Evaluator-authored PRs where both lanes write
 # `engineer-reviewed`). Only comments from TRUSTED_SENTINEL_AUTHORS are
-# considered, matching the sentinel-trust rule. Returns nonzero on a FAILED
-# fetch — callers must not treat a failure as an empty review body.
+# considered, matching the sentinel-trust rule, and a comment only counts as
+# review evidence when it carries an ACTUAL sentinel — literal `<!-- -->`
+# delimiters plus the strict verdict whitelist, same matcher as
+# sentinel_verdict — so trusted prose that merely QUOTES
+# `<name>: <sha> verdict: ...` is never selected and misattributed as a
+# lane's findings. In `engineer-pair` mode the comment must carry EXACTLY
+# one sentinel for this SHA, mirroring the per-comment pair-mode consensus
+# discipline: a comment stuffed with multiple sentinels is not a lane
+# review. Returns nonzero on a FAILED fetch — callers must not treat a
+# failure as an empty review body.
 review_comment_body() {
-  local repo="$1" num="$2" name="$3" sha="$4" idx="${5:--1}"
-  local raw login b64 c_body match_b64s="" n=0 pick target
+  local repo="$1" num="$2" name="$3" sha="$4" idx="${5:--1}" mode="${6:-standard}"
+  local raw login b64 c_body s_cnt match_b64s="" n=0 pick target
 
   if ! raw=$(pr_comments_with_authors "$repo" "$num"); then
     return 1
@@ -582,10 +590,15 @@ review_comment_body() {
     [[ -z "$login" && -z "$b64" ]] && continue
     is_trusted_author "$login" || continue
     c_body="$(decode_b64 "$b64")"
-    if printf '%s' "$c_body" | grep -Fq -- "${name}: ${sha}"; then
-      match_b64s+="$b64"$'\n'
-      n=$((n + 1))
+    s_cnt="$(sentinel_verdicts_all "$c_body" "$name" "$sha" | grep -c . || true)"
+    (( s_cnt >= 1 )) || continue
+    if [[ "$mode" == "engineer-pair" && "$s_cnt" != "1" ]]; then
+      # Pair mode requires exactly one sentinel per comment (matching the
+      # consensus parser) — a multi-sentinel comment is never lane evidence.
+      continue
     fi
+    match_b64s+="$b64"$'\n'
+    n=$((n + 1))
   done <<<"$raw"
 
   (( n > 0 )) || return 0
@@ -601,11 +614,19 @@ review_comment_body() {
 # `mention[:]//` — plain literal characters that render readably but can
 # never fire a live mention. An HTML-entity form like `mention&#58;//` is
 # NOT safe here: Markdown parsers decode entities inside link destinations,
-# so a rendered link could restore the live scheme. Leader-only routing
-# depends on this — the CEO's own routing mention lives in the
-# script-authored header, never inside neutralized content.
+# so a rendered link could restore the live scheme. For the same reason,
+# reviewer input that ALREADY carries an entity-encoded colon (decimal
+# `&#58;` or hex `&#x3a;` / `&#x3A;`) must be rewritten too — otherwise it
+# passes through untouched and decodes into a live `mention://` at Markdown
+# render time. Leader-only routing depends on this — the CEO's own routing
+# mention lives in the script-authored header, never inside neutralized
+# content.
 neutralize_mentions() {
-  sed 's|mention://|mention[:]//|g'
+  sed \
+    -e 's|mention&#58;//|mention[:]//|g' \
+    -e 's|mention&#x3a;//|mention[:]//|g' \
+    -e 's|mention&#x3A;//|mention[:]//|g' \
+    -e 's|mention://|mention[:]//|g'
 }
 
 post_review_outcome_comment() {
@@ -634,12 +655,12 @@ post_review_outcome_comment() {
 
   # A failed review-body fetch must not degrade into an empty-findings outcome
   # comment: skip this PR for the sweep instead (state re-derives next run).
-  if ! engineer_body="$(review_comment_body "$repo" "$num" "$peer_name" "$sha" "$peer_idx")"; then
+  if ! engineer_body="$(review_comment_body "$repo" "$num" "$peer_name" "$sha" "$peer_idx" "$lane_mode")"; then
     log "    [warn] fetch failed for peer review body on $GH_OWNER/$repo#$num; skipping this sweep"
     PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
     return 1
   fi
-  if ! evaluator_body="$(review_comment_body "$repo" "$num" "$adv_name" "$sha" "$adv_idx")"; then
+  if ! evaluator_body="$(review_comment_body "$repo" "$num" "$adv_name" "$sha" "$adv_idx" "$lane_mode")"; then
     log "    [warn] fetch failed for adversarial review body on $GH_OWNER/$repo#$num; skipping this sweep"
     PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
     return 1

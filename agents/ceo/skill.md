@@ -41,7 +41,7 @@ Stay scoped. Do not rewrite or expand work outside the current issue's stated sc
 | Issue assigned to the squad | Plan comment + ONE delegation comment for the first step(s) — State 1 |
 | Re-trigger: member delivery comment (no mentions in it) | Evidence check → next dispatch / Evaluator dispatch / rework / escalation — State 2 |
 | Re-trigger: Evaluator verification delivery | PASS → step done, next dispatch or close; FAIL → rework to the step's ORIGINAL executor (never the Evaluator); unclear → ask the human — State 3 |
-| Re-trigger: human comment or cross-reference | Route it, or exit silently if no action is needed — State 4 |
+| Re-trigger: member delivery comment containing `[auto-harness: checkpoint-plan]` or `[auto-harness: e2e-plan]` | Validate the plan, create one child issue per entry, dispatch each with an inline `dod:` block, post the `[auto-harness: dispatch]` comment — see Auto-Harness Child Dispatch below |
 | All plan steps done | Completion summary — State 5 |
 | pr-sweep `ceo-followup` comment (agreed request-changes/block) | Rework dispatch to the PR's author agent (read from the outcome comment's `- Original author:` line) with a DoD referencing the review findings. When the advisory line reports the cap (3) is reached, escalate to the human instead of dispatching — never authorize a fourth iteration — see PR Review Adjudication below |
 | pr-sweep `ceo-debate` comment | Deciding vote (approve / request-changes / block) + per-finding replies per the Discussion Protocol + the `ceo-resolved` resolution sentinel posted on the PR |
@@ -134,6 +134,24 @@ Options:
 
 No further dispatches on this step until you direct one.
 ```
+
+## Auto-Harness Child Dispatch
+
+Re-triggered by a delivery comment containing `[auto-harness: checkpoint-plan]` or `[auto-harness: e2e-plan]` — an Engineer has proposed child issues; creating and dispatching them is your move, per the cost rule.
+
+1. Validate every proposed child carries all four suggested DoD fields: `outcome`, `evidence`, `verification`, `max_rounds`. Any entry missing a field, or a plan with zero entries, is malformed → rework dispatch back to the proposing Engineer naming the missing fields; this counts against that step's `max_rounds`. Do not create any children from a malformed plan.
+2. For a valid plan, create ONE child issue per entry (`multica issue create` with the entry's title and self-contained body, parented to the triggering issue), assigned to an Engineer instance — instance-neutral; either takes fresh work.
+3. Dispatch each child with a delegation comment carrying an inline `dod:` block per the DoD Dispatch Protocol above. The plan's suggested DoD fields are advisory — you may tighten them, but no child is dispatched without a complete block.
+4. Post one comment on the parent issue:
+
+   ```
+   [auto-harness: dispatch]
+
+   Dispatched checkpoints:
+   - cp-NN → [STO-NNN](mention://issue/<id>) → Engineer
+   ```
+
+5. Then normal states apply: child deliveries re-trigger you through States 2–3; when every child closes, the proposing Engineer's next re-trigger continues the harness flow.
 
 ## PR Review Adjudication (pr-sweep)
 
