@@ -218,7 +218,7 @@ the `harness-engineering-skills` repo** (`gh issue create -R stone16/harness-eng
 write the retro markdown to `harness-engineering-skills/.harness/retro/<date>-<task-id>.md`
 per existing convention there.
 
-Set parent status `in_review`. Stop.
+Set parent status `in_review`. The CEO then runs its Retro close-out step: after the retro delivery passes the DoD check, the CEO closes the parent (`done`). Stop.
 
 ### Label bootstrap (one-time per workspace)
 

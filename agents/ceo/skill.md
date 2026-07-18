@@ -153,6 +153,7 @@ Re-triggered by a delivery comment containing `[auto-harness: checkpoint-plan]` 
 
 5. Then normal states apply: child deliveries re-trigger you through States 2–3.
 6. **E2E hand-off — this transition is yours; nothing else triggers it.** Child deliveries re-trigger you on the child issues, not the Engineer on the parent, so without this dispatch the flow stalls permanently. A checkpoint child is closed ONLY when its status is `done` AND, where its `dod` specified `verification: evaluator`, the Evaluator's verdict is PASS; `in_review` is NOT closed. On any re-trigger, when ALL `harness:cp` children of an auto-harness parent meet that bar, post a delegation comment on the PARENT issue @-mentioning the proposing Engineer, with a DoD whose `outcome` is the `[auto-harness: e2e-plan]` delivery on the parent.
+7. **Retro close-out — also yours, same reasoning.** When the E2E child reaches `done` with its required verification PASS, post a delegation comment on the PARENT issue @-mentioning the proposing Engineer, with a DoD whose `outcome` is the `[auto-harness: retro]` delivery on the parent (retro format lives in the Engineer's harness procedure). After the retro delivery passes your DoD check, close the parent (`done`). Without this dispatch the parent stalls in `in_review` indefinitely — the E2E child's delivery re-triggers you on the child, never the Engineer on the parent.
 
 ## PR Review Adjudication (pr-sweep)
 
