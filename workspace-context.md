@@ -54,12 +54,12 @@ Agent-created PRs MUST be opened as GitHub **Ready for review**, never as Draft 
 
 Every PR description MUST follow `templates/pr-description.md` verbatim and contain the routing preamble plus every section below, each filled.
 
-**Routing preamble** (appears above `## Summary`; both lines below are machine-parsed by `pr-sweep.sh` and the format is fixed):
+**Routing preamble** (appears above `## Summary`; the formats are fixed — only the `Original author:` line is machine-parsed by `pr-sweep.sh`):
 
 | Line | Content |
 |---|---|
-| **Originating Multica issue** | `Originating Multica issue: [STO-NNN](mention://issue/<uuid>)` — the Multica issue this PR closes. The PR-sweep parser extracts the UUID via the literal `mention://issue/<uuid>` form; free text like `closes #NNN` or "see Multica" does NOT satisfy this requirement and the PR-review loop will block on it. **Required for every PR.** |
-| **Original author** | `Original author: [@AgentName](mention://agent/<uuid>)` — the agent that opened this PR. When code review consensus is `request-changes`, the sweep routes the feedback back to this agent for up to 3 iterations before escalating to a human. **Required for agent-authored PRs**; human-authored PRs may omit this line (the loop falls back to escalating directly to `CEO_MENTION` for those PRs). |
+| **Originating Multica issue** | `Originating Multica issue: [STO-NNN](mention://issue/<uuid>)` — the Multica issue this PR closes. A required traceability convention: keep the exact `mention://issue/<uuid>` form; free text like `closes #NNN` or "see Multica" does not satisfy it. The sweep does NOT parse this line — reviewers and the CEO read it by hand. **Required for every PR.** |
+| **Original author** | `Original author: [@AgentName](mention://agent/<uuid>)` — the agent that opened this PR. The only machine-parsed preamble line: `pr-sweep.sh` extracts the agent UUID to pick the peer review lane (the Engineer instance that did not author reviews) and to give the CEO author context. The sweep never routes rework to the author — every non-approve outcome is escalated to the CEO (`ceo-followup` on non-approve consensus, `ceo-debate` on lane disagreement), and the CEO dispatches rework, with an advisory cap of 3 iterations before escalating to the human. **Required for agent-authored PRs**; human-authored PRs may omit this line (the peer lane then defaults to Engineer-A, and escalation still goes to the CEO via `CEO_MENTION`). |
 
 **Body sections**:
 

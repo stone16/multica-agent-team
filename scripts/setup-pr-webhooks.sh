@@ -24,10 +24,13 @@
 #     everything the token can see. Org names stay in env, not in files.
 #
 # Idempotent: existing hooks are listed first. A target counts as installed
-# only when a hook points at the same URL AND is active, covers all three
-# events, uses content_type json, and has insecure_ssl "0". A URL match
-# whose config has drifted is repaired in place (PATCH re-asserts the full
-# desired state) instead of being silently skipped. The URL comparison
+# only when a hook points at the same URL AND is active, subscribes to
+# EXACTLY the three required events (no extras — an extra event would fire
+# the Multica autopilot on triggers the pipeline never asked for), uses
+# content_type json, and has insecure_ssl "0". A URL match whose config has
+# drifted is repaired in place (PATCH re-asserts the full desired state;
+# GitHub replaces the events list wholesale, so extras are removed) instead
+# of being silently skipped. The URL comparison
 # happens inside gh's jq filter against the environment variable, so
 # neither our URL nor any listed hook URL is ever logged or placed on a
 # command line. This script creates and repairs only hooks that point at
@@ -214,25 +217,31 @@ list_owner_repos() {
 }
 
 # Prints one TSV line per existing hook on the target that points at the
-# Multica webhook URL: <id> <active> <events_ok> <content_type_ok> <ssl_ok>
-# (the last four as yes/no). The URL comparison runs inside gh's jq filter
-# against env.MULTICA_WEBHOOK_URL, so hook URLs (ours and any other
-# service's, which frequently embed credentials) never appear in output,
-# logs, or argv. Events are checked by exact membership — jq's `contains`
-# does substring matching on strings, which would let pull_request_review
-# satisfy a pull_request requirement.
+# Multica webhook URL:
+#   <id> <active> <events_ok> <content_type_ok> <ssl_ok> <missing> <extra>
+# (fields 2-5 as yes/no; <missing>/<extra> are comma-joined event names, or
+# "-" when empty). The URL comparison runs inside gh's jq filter against
+# env.MULTICA_WEBHOOK_URL, so hook URLs (ours and any other service's,
+# which frequently embed credentials) never appear in output, logs, or
+# argv. events_ok demands exact SET EQUALITY (sorted events == the sorted
+# required set), not mere membership: a hook subscribed to extra events
+# would fire the Multica autopilot on triggers the pipeline never asked
+# for, so extras are config drift just like missing events. Plain equality
+# on sorted arrays also avoids jq's `contains`, whose substring matching on
+# strings would let pull_request_review satisfy a pull_request requirement.
 hook_records() {
   gh api "$1" --paginate --jq '
-    .[]
+    ["issue_comment", "pull_request", "pull_request_review"] as $want
+    | .[]
     | select((.config.url // "") == env.MULTICA_WEBHOOK_URL)
-    | (.events // []) as $ev
+    | ((.events // []) | sort) as $ev
     | [ (.id | tostring),
         (if .active == true then "yes" else "no" end),
-        (if (["pull_request", "issue_comment", "pull_request_review"]
-              | map(. as $e | $ev | index($e) != null) | all)
-         then "yes" else "no" end),
+        (if $ev == $want then "yes" else "no" end),
         (if (.config.content_type // "") == "json" then "yes" else "no" end),
-        (if ((.config.insecure_ssl // "") | tostring) == "0" then "yes" else "no" end) ]
+        (if ((.config.insecure_ssl // "") | tostring) == "0" then "yes" else "no" end),
+        (($want - $ev) | if . == [] then "-" else join(",") end),
+        (($ev - $want) | if . == [] then "-" else join(",") end) ]
     | @tsv' 2> /dev/null
 }
 
@@ -241,20 +250,21 @@ hook_records() {
 HOOK_ID=""
 HOOK_DRIFT=""
 
-# 0: a fully configured hook exists (active, all three events, json, ssl
-#    verification on) — nothing to do;
+# 0: a fully configured hook exists (active, EXACTLY the three required
+#    events, json, ssl verification on) — nothing to do;
 # 1: no hook points at the webhook URL — create;
 # 2: cannot list hooks — refuse to act blind;
 # 3: URL match but config drifted — update (HOOK_ID / HOOK_DRIFT set).
 hook_state() {
   local api_path="$1" records id active events_ok ctype_ok ssl_ok drift
+  local missing extra ev_detail
   HOOK_ID=""
   HOOK_DRIFT=""
   if ! records="$(hook_records "$api_path")"; then
     return 2
   fi
   [[ -n "$records" ]] || return 1
-  while IFS=$'\t' read -r id active events_ok ctype_ok ssl_ok; do
+  while IFS=$'\t' read -r id active events_ok ctype_ok ssl_ok missing extra; do
     [[ -n "$id" ]] || continue
     if [[ "$active" == "yes" && "$events_ok" == "yes" && "$ctype_ok" == "yes" && "$ssl_ok" == "yes" ]]; then
       # Any fully configured hook wins, even if another URL match drifts.
@@ -266,7 +276,14 @@ hook_state() {
       HOOK_ID="$id"
       drift=""
       [[ "$active" == "yes" ]] || drift+="${drift:+, }inactive"
-      [[ "$events_ok" == "yes" ]] || drift+="${drift:+, }events incomplete"
+      if [[ "$events_ok" != "yes" ]]; then
+        # Name what deviates from the exact required set, so the operator
+        # sees WHY a superset hook still counts as drift.
+        ev_detail=""
+        [[ -n "$missing" && "$missing" != "-" ]] && ev_detail+="missing: $missing"
+        [[ -n "$extra" && "$extra" != "-" ]] && ev_detail+="${ev_detail:+; }extra: $extra"
+        drift+="${drift:+, }events not the exact required set${ev_detail:+ ($ev_detail)}"
+      fi
       [[ "$ctype_ok" == "yes" ]] || drift+="${drift:+, }content_type not json"
       [[ "$ssl_ok" == "yes" ]] || drift+="${drift:+, }insecure_ssl enabled"
       HOOK_DRIFT="$drift"
@@ -276,7 +293,9 @@ hook_state() {
 }
 
 # Full desired-state body, shared by create (POST) and repair (PATCH) —
-# both re-assert the same state, so drift can never survive an apply.
+# both re-assert the same state, so drift can never survive an apply. On
+# PATCH, GitHub replaces the "events" list wholesale with exactly the three
+# events below, so a superset hook is trimmed back to the desired set.
 # GitHub ignores the extra "name" field on PATCH. JSON string escaping:
 # backslash and double-quote are the only characters in a URL-shaped value
 # that need it, which keeps this dependency-free.
@@ -360,7 +379,7 @@ ensure_hook() { # target api_path kind
   case "$rc" in
     0)
       log "[$target] hook already installed with the desired config — skip"
-      add_row "$target" "$kind" "skip" "installed (url, active, events, content_type, insecure_ssl all match)"
+      add_row "$target" "$kind" "skip" "installed (url, active, exact events, content_type, insecure_ssl all match)"
       ;;
     1)
       if [[ "$APPLY" -eq 1 ]]; then

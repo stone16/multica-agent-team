@@ -8,10 +8,23 @@
 #   1. Enumerate open PRs across all non-archived stone16/* repos
 #   2. For each PR, read sentinel state from PR comments
 #   3. Decide what's needed:
-#        - converged (consensus / debate sentinel for current SHA) → skip
+#        - consensus sentinel at current SHA → converged, skip
+#        - debate sentinel at current SHA:
+#            - CEO resolution sentinel (`ceo-resolved`) at the SAME SHA →
+#              write the final consensus sentinel with the resolved verdict
+#              and finish (approve → mark the review issue done; non-approve →
+#              the CEO already owns rework from the adjudication, so record
+#              the sentinel and stop — no new outcome comment)
+#            - no resolution yet → log waiting-for-CEO-adjudication and skip
+#              (a debate is NOT permanent-final)
 #        - both lanes reviewed at this SHA → compute consensus and write sentinel
 #        - only one lane reviewed → request the other lane in the PR's issue
 #        - neither reviewed → request the peer Engineer first in the PR's issue
+#      Evaluator-authored PRs are special: the adversarial lane never
+#      self-reviews, so BOTH lanes are carried by the two Engineer instances
+#      (peer: Engineer-A, adversarial checklist: Engineer-B) and consensus
+#      accepts two `engineer-reviewed` sentinels from two distinct review
+#      comments as the two lanes.
 #   4. Create/reuse one Multica issue per PR, keyed by a hidden PR comment
 #   5. Route the reconciled outcome in that same issue: EVERY non-approve
 #      outcome (agreed request-changes, agreed block, lane disagreement)
@@ -96,14 +109,21 @@ list_open_prs() {
     --jq '.[] | "\(.number)\t\(.headRefOid)\t\(.author.login)"'
 }
 
+# Read-failure discipline: these fetch helpers distinguish FAILURE (gh/API
+# error → nonzero exit status) from genuinely-empty data (empty stdout, exit
+# 0). Callers MUST check the exit status with `if ! out=$(...)`. On any read
+# failure for a PR, the caller logs a warning, increments PRS_FETCH_FAILED,
+# and skips that PR for this sweep — state is re-derived from the PR thread
+# next run, so skipping is safe by design. No decision (peer-lane pick, issue
+# dispatch, consensus, final sentinel) may ever be made from error-empty data.
 pr_comments_body() {
   gh pr view "$2" --repo "$GH_OWNER/$1" --json comments \
-    --jq '.comments[].body' 2>/dev/null || true
+    --jq '.comments[].body' 2>/dev/null
 }
 
 pr_body() {
   gh pr view "$2" --repo "$GH_OWNER/$1" --json body \
-    --jq '.body // ""' 2>/dev/null || true
+    --jq '.body // ""' 2>/dev/null
 }
 
 post_pr_comment() {
@@ -132,8 +152,13 @@ review_queue_item() {
 
 # ---------- Sentinel parsing ----------
 
-# Returns the verdict word if a sentinel matching <name>: <sha> verdict: <v>
-# exists in the body, else empty.
+# Returns the verdict word if a sentinel matching
+# <!-- <name>: <sha> verdict: <v> --> exists in the body, else empty.
+# The regex requires the literal HTML-comment delimiters `<!--` and `-->`
+# (same hardening as iteration_count below) so that prose merely QUOTING a
+# sentinel — e.g. a backticked `ceo-resolved: <sha> verdict: approve` in a
+# discussion or postmortem comment — can never converge a debate or alter
+# sweep behavior. Only actual sentinels posted as HTML comments count.
 sentinel_verdict() {
   local body="$1" name="$2" sha="$3"
   # Pipeline returns 1 when grep finds no sentinel — that's the common
@@ -141,15 +166,47 @@ sentinel_verdict() {
   # returning 0 with empty stdout so callers using `var=$(...)` under
   # set -e -o pipefail don't blow up.
   printf '%s' "$body" \
-    | grep -oE "${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+" \
+    | grep -oE "<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+[[:space:]]*-->" \
     | tail -1 \
     | sed -E "s/.*verdict:[[:space:]]*([a-z-]+).*/\1/" \
     || true
 }
 
-has_final_sentinel() {
+# Only the consensus sentinel is terminal for a SHA.
+# Requires the full delimited form emitted by write-time code
+# (`<!-- consensus: <sha> verdict: <v> -->`) so quoted prose cannot match.
+has_consensus_sentinel() {
   local body="$1" sha="$2"
-  printf '%s' "$body" | grep -qE "(consensus|debate):[[:space:]]*${sha}\\b"
+  printf '%s' "$body" \
+    | grep -qE "<!--[[:space:]]*consensus:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+[[:space:]]*-->"
+}
+
+# The debate sentinel is NOT terminal: it means the lanes disagreed and the
+# CEO owes an adjudication. The CEO closes the loop by posting the resolution
+# sentinel on the PR after casting the deciding vote in the Multica issue:
+#   <!-- ceo-resolved: <head-sha> verdict: <approve|request-changes|block> -->
+# debate + ceo-resolved at the SAME SHA → the sweep writes the final consensus
+# sentinel with the resolved verdict. debate without ceo-resolved → the sweep
+# logs "waiting for CEO adjudication" and skips (never treats it as final).
+# Requires the full delimited form (`<!-- debate: <sha> -->`) so quoted
+# prose cannot match.
+has_debate_sentinel() {
+  local body="$1" sha="$2"
+  printf '%s' "$body" \
+    | grep -qE "<!--[[:space:]]*debate:[[:space:]]*${sha}[[:space:]]*-->"
+}
+
+# All verdicts for a lane sentinel at this SHA, one per line, in thread order.
+# Used for Evaluator-authored PRs, where BOTH lanes write `engineer-reviewed`
+# sentinels in two distinct review comments (first = peer, second =
+# adversarial checklist). Requires the `<!-- -->` delimiters, same as
+# sentinel_verdict, so quoted prose cannot inject verdicts.
+sentinel_verdicts_all() {
+  local body="$1" name="$2" sha="$3"
+  printf '%s' "$body" \
+    | grep -oE "<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+[[:space:]]*-->" \
+    | sed -E "s/.*verdict:[[:space:]]*([a-z-]+).*/\1/" \
+    || true
 }
 
 # Count distinct prior head SHAs that landed a non-approve consensus on this PR.
@@ -197,6 +254,20 @@ original_author_id_from_body() {
   printf '%s\n' "$body" \
     | grep -E '^[[:space:]]*Original author:' \
     | sed -nE 's/.*mention:\/\/agent\/([0-9a-fA-F-]{36}).*/\1/p' \
+    | head -1 \
+    || true
+}
+
+# Extract the exact author mention markdown — `[@Name](mention://agent/<uuid>)`
+# — from the PR body's "Original author:" line. It feeds the informational
+# `- Original author:` line in the CEO outcome comment (wrapped in backticks
+# there so it never acts as a live mention — leader-only routing holds).
+# Returns empty when the line is absent or its mention markdown is unparseable.
+original_author_mention_from_body() {
+  local body="$1"
+  printf '%s\n' "$body" \
+    | grep -E '^[[:space:]]*Original author:' \
+    | grep -oE '\[@[^]]+\]\(mention://agent/[0-9a-fA-F-]{36}\)' \
     | head -1 \
     || true
 }
@@ -284,7 +355,7 @@ This is the single Multica thread for this PR review.
 PR: $(review_queue_item "$repo" "$num" "$sha")
 Idempotency key: $(pr_url "$repo" "$num")
 
-The sweep reuses this issue for every head SHA on this PR. New pushes append a new review request comment; older review comments are stale when their SHA differs. The issue is marked \`done\` when both lanes approve. Every non-approve outcome — agreed request-changes, agreed block, or lane disagreement — is escalated to the CEO in this issue; the sweep never @-mentions the PR's author. The CEO dispatches rework, honoring the advisory rework-iteration count in the outcome comment (past $MAX_REVIEW_ITERATIONS iterations, the CEO escalates to the human instead of dispatching).
+The sweep reuses this issue for every head SHA on this PR. New pushes append a new review request comment; older review comments are stale when their SHA differs. The issue is marked \`done\` when both lanes approve. Every non-approve outcome — agreed request-changes, agreed block, or lane disagreement — is escalated to the CEO in this issue; the sweep never @-mentions the PR's author. The CEO dispatches rework, honoring the advisory rework-iteration count in the outcome comment (once the count reaches the cap of $MAX_REVIEW_ITERATIONS, the CEO escalates to the human instead of dispatching — a further iteration is never authorized). A lane disagreement converges only after the CEO posts the \`ceo-resolved\` resolution sentinel on the PR.
 
 PRs to review (format: clickable \`owner/repo#num\` plus \`@\` head SHA - the SHA shows the head when this request was assembled):
 
@@ -379,24 +450,67 @@ strip_review_sentinel() {
   sed -E "/<!--[[:space:]]*${name}:[[:space:]]*${sha}[[:space:]]+verdict:[[:space:]]*[a-z-]+[[:space:]]*-->/d"
 }
 
+# Fetch one lane's review comment body (sentinel stripped). `idx` selects
+# which matching comment (-1 = last, -2 = second-to-last; the latter is used
+# for the peer review on Evaluator-authored PRs where both lanes write
+# `engineer-reviewed`). Returns nonzero on a FAILED fetch — callers must not
+# treat a failure as an empty review body.
 review_comment_body() {
-  local repo="$1" num="$2" name="$3" sha="$4"
-  local jq_filter
-  jq_filter="[.comments[] | select(.body | contains(\"${name}: ${sha}\")) | .body][-1] // \"\""
+  local repo="$1" num="$2" name="$3" sha="$4" idx="${5:--1}"
+  local jq_filter raw
+  jq_filter="[.comments[] | select(.body | contains(\"${name}: ${sha}\")) | .body][${idx}] // \"\""
 
-  gh pr view "$num" --repo "$GH_OWNER/$repo" --json comments --jq "$jq_filter" 2>/dev/null \
-    | strip_review_sentinel "$name" "$sha" \
-    || true
+  if ! raw=$(gh pr view "$num" --repo "$GH_OWNER/$repo" --json comments --jq "$jq_filter" 2>/dev/null); then
+    return 1
+  fi
+  printf '%s' "$raw" | strip_review_sentinel "$name" "$sha"
 }
 
 post_review_outcome_comment() {
   local issue_id="$1" repo="$2" num="$3" sha="$4" outcome="$5" engineer="$6" evaluator="$7"
-  local action_kind="$8" reason="$9" iter="${10}"
-  local link marker engineer_body evaluator_body comment header iter_line protocol
+  local action_kind="$8" reason="$9" iter="${10}" author_mention="${11:-}" lane_mode="${12:-standard}"
+  local link marker engineer_body evaluator_body comment header iter_line protocol author_line
+  local peer_name="engineer-reviewed" adv_name="evaluator-reviewed" peer_idx="-1" adv_idx="-1"
+  local peer_verdict_label="Engineer verdict (peer lane)"
+  local adv_verdict_label="Evaluator verdict (adversarial lane)"
+  local peer_section="Engineer Review (peer lane)"
+  local adv_section="Evaluator Review (adversarial lane)"
   link="$(pr_url "$repo" "$num")"
   marker="$(review_outcome_marker "$sha")"
-  engineer_body="$(review_comment_body "$repo" "$num" "engineer-reviewed" "$sha")"
-  evaluator_body="$(review_comment_body "$repo" "$num" "evaluator-reviewed" "$sha")"
+
+  if [[ "$lane_mode" == "engineer-pair" ]]; then
+    # Evaluator-authored PR: both lanes wrote `engineer-reviewed` sentinels in
+    # two distinct review comments — first is the peer lane, second is the
+    # adversarial checklist lane.
+    adv_name="engineer-reviewed"
+    peer_idx="-2"
+    peer_verdict_label="Peer lane verdict (Engineer)"
+    adv_verdict_label="Adversarial lane verdict (Engineer — Evaluator-authored PR)"
+    peer_section="Peer Lane Review (Engineer)"
+    adv_section="Adversarial Lane Review (Engineer — Evaluator-authored PR)"
+  fi
+
+  # A failed review-body fetch must not degrade into an empty-findings outcome
+  # comment: skip this PR for the sweep instead (state re-derives next run).
+  if ! engineer_body="$(review_comment_body "$repo" "$num" "$peer_name" "$sha" "$peer_idx")"; then
+    log "    [warn] fetch failed for peer review body on $GH_OWNER/$repo#$num; skipping this sweep"
+    PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
+    return 1
+  fi
+  if ! evaluator_body="$(review_comment_body "$repo" "$num" "$adv_name" "$sha" "$adv_idx")"; then
+    log "    [warn] fetch failed for adversarial review body on $GH_OWNER/$repo#$num; skipping this sweep"
+    PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
+    return 1
+  fi
+
+  # Author identity for the CEO's rework dispatch. The mention markdown is
+  # wrapped in backticks so this line stays informational — the sweep never
+  # emits a live mention of the author (leader-only routing).
+  if [[ -n "$author_mention" ]]; then
+    author_line="- Original author: \`${author_mention}\` (backticked — informational, not a live mention; rework routing stays with the CEO)"
+  else
+    author_line="- Original author: unknown (human-authored or preamble unparseable) — no agent rework target; treat as human-owned"
+  fi
 
   # Leader-only routing: every header below mentions ONLY the CEO. The script
   # never @-mentions PR authors; the CEO dispatches rework. The iteration line
@@ -406,7 +520,7 @@ post_review_outcome_comment() {
       if [[ "$reason" == "missing-author" ]]; then
         header="$CEO_MENTION PR review came back with \`$outcome\`, and the PR body has no \`Original author: [@AgentName](mention://agent/<uuid>)\` line, so the author agent cannot be identified. Please handle the follow-up in this issue: identify an owner and dispatch rework with a DoD referencing the findings below, or hand off, close, or override."
       else
-        header="$CEO_MENTION PR review came back with \`$outcome\`. Please dispatch rework to the PR's author agent with a DoD referencing the findings below, or hand off, close, or override. The sweep does not route to authors; routing is yours."
+        header="$CEO_MENTION PR review came back with \`$outcome\`. Please dispatch rework to the PR's author agent (identity on the \`- Original author:\` line below) with a DoD referencing the findings below, or hand off, close, or override. The sweep does not route to authors; routing is yours."
       fi
       if (( iter >= MAX_REVIEW_ITERATIONS )); then
         iter_line="- Rework iterations so far: $iter (cap: $MAX_REVIEW_ITERATIONS — reached; advisory: escalate to the human instead of dispatching rework)"
@@ -424,7 +538,7 @@ PROTO
 )
       ;;
     ceo-debate)
-      header="$CEO_MENTION Reviewers disagree on this PR. Please cast the deciding vote (approve / request-changes / block) in this issue so the loop can converge."
+      header="$CEO_MENTION Reviewers disagree on this PR. Please cast the deciding vote (approve / request-changes / block) in this issue, then post the resolution sentinel as a PR comment exactly as \`<!-- ceo-resolved: $sha verdict: <approve|request-changes|block> -->\` — that sentinel is what lets the sweep converge; without it the debate stays open."
       iter_line=""
       protocol=$(cat <<'PROTO'
 ## Discussion Protocol
@@ -453,17 +567,18 @@ $header
 - PR: $link
 - Head commit: $sha
 - Final verdict: $outcome
-- Engineer verdict (peer lane): $engineer
-- Evaluator verdict (adversarial lane): $evaluator$body_iter
+- $peer_verdict_label: $engineer
+- $adv_verdict_label: $evaluator
+$author_line$body_iter
 - Action: $action_kind
 
 $protocol
 
-## Engineer Review (peer lane)
+## $peer_section
 
 $engineer_body
 
-## Evaluator Review (adversarial lane)
+## $adv_section
 
 $evaluator_body
 
@@ -480,12 +595,19 @@ EOF
 }
 
 dispatch_review_request() {
-  local repo="$1" num="$2" sha="$3" comments="$4" agent="$5"
-  local issue_id marker lane lane_desc comment
+  local repo="$1" num="$2" sha="$3" comments="$4" agent="$5" lane_role="${6:-}"
+  local issue_id marker lane lane_desc lane_note comment
   lane="$(review_lane_for_agent "$agent")"
   marker="$(review_request_marker "$sha" "$agent")"
+  lane_note=""
 
-  if [[ "$lane" == "evaluator" ]]; then
+  if [[ "$lane_role" == "adversarial-engineer" ]]; then
+    # Evaluator-authored PR: the adversarial lane never self-reviews, so the
+    # adversarial checklist is carried by an Engineer instance.
+    lane="engineer"
+    lane_desc="the adversarial lane on an Evaluator-authored PR: security, performance, dependency risk, and adversarial inputs. The Evaluator never reviews its own PR, so this lane is carried by an Engineer instance"
+    lane_note="Lane attribution note: this PR was authored by the Evaluator, so BOTH lanes are carried by Engineer instances. Run the adversarial checklist, but write the \`engineer-reviewed\` sentinel (never \`evaluator-reviewed\`); the sweep accepts two \`engineer-reviewed\` sentinels from two distinct review comments as the two lanes (first = peer, second = adversarial)."
+  elif [[ "$lane" == "evaluator" ]]; then
     lane_desc="the Evaluator adversarial lane: security, performance, dependency risk, and adversarial inputs"
   else
     lane_desc="the Engineer peer lane: general code quality, as the Engineer instance that did not author this PR"
@@ -504,6 +626,9 @@ dispatch_review_request() {
     return 0
   fi
 
+  local note_block=""
+  [[ -n "$lane_note" ]] && note_block=$'\n'"$lane_note"$'\n'
+
   comment=$(cat <<EOF
 $agent review is requested for $(review_queue_item "$repo" "$num" "$sha").
 
@@ -512,7 +637,7 @@ You are reviewing $lane_desc. Follow the instructions in this issue description.
 \`\`\`
 <!-- ${lane}-reviewed: <head-sha> verdict: <approve|request-changes|block> -->
 \`\`\`
-
+$note_block
 After posting the PR review, add a one-line summary here and set this issue to \`in_review\`. Do not @-mention another agent; the sweep will move this same issue to the other lane or, on any non-approve outcome, to the CEO.
 
 $marker
@@ -529,7 +654,7 @@ EOF
 
 dispatch_review_outcome() {
   local repo="$1" num="$2" sha="$3" outcome="$4" engineer="$5" evaluator="$6"
-  local action_kind="$7" reason="$8" iter="$9" comments="${10}"
+  local action_kind="$7" reason="$8" iter="$9" comments="${10}" author_mention="${11:-}" lane_mode="${12:-standard}"
   local issue_id marker
   marker="$(review_outcome_marker "$sha")"
   # Every non-approve outcome is owned by the CEO — the script never assigns
@@ -544,7 +669,7 @@ dispatch_review_outcome() {
     return 0
   fi
 
-  if ! post_review_outcome_comment "$issue_id" "$repo" "$num" "$sha" "$outcome" "$engineer" "$evaluator" "$action_kind" "$reason" "$iter"; then
+  if ! post_review_outcome_comment "$issue_id" "$repo" "$num" "$sha" "$outcome" "$engineer" "$evaluator" "$action_kind" "$reason" "$iter" "$author_mention" "$lane_mode"; then
     return 1
   fi
 
@@ -576,8 +701,18 @@ close_review_issue_if_known() {
 #                           iteration line lets the CEO enforce the cap)
 #   approve + approve     → close the PR's review issue
 write_consensus() {
-  local repo="$1" num="$2" sha="$3" engineer="$4" evaluator="$5" comments="${6:-}" author_uuid="${7:-}"
-  [[ -n "$comments" ]] || comments="$(pr_comments_body "$repo" "$num")"
+  local repo="$1" num="$2" sha="$3" engineer="$4" evaluator="$5" comments="${6:-}" author_uuid="${7:-}" author_mention="${8:-}" lane_mode="${9:-standard}"
+  local peer_lane_label="Engineer (peer lane)" adv_lane_label="Evaluator (adversarial lane)"
+  if [[ "$lane_mode" == "engineer-pair" ]]; then
+    adv_lane_label="Engineer (adversarial lane — Evaluator-authored PR)"
+  fi
+  if [[ -z "$comments" ]]; then
+    if ! comments="$(pr_comments_body "$repo" "$num")"; then
+      log "    [warn] fetch failed for PR comments on $GH_OWNER/$repo#$num; skipping this sweep"
+      PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
+      return 0
+    fi
+  fi
 
   if [[ "$engineer" == "$evaluator" ]]; then
     if [[ "$engineer" == "approve" ]]; then
@@ -590,7 +725,7 @@ write_consensus() {
       reason=""
       [[ -z "$author_uuid" ]] && reason="missing-author"
 
-      if ! dispatch_review_outcome "$repo" "$num" "$sha" "consensus: $engineer" "$engineer" "$evaluator" "ceo-followup" "$reason" "$iter" "$comments"; then
+      if ! dispatch_review_outcome "$repo" "$num" "$sha" "consensus: $engineer" "$engineer" "$evaluator" "ceo-followup" "$reason" "$iter" "$comments" "$author_mention" "$lane_mode"; then
         log "    [warn] review issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
         return 0
       fi
@@ -604,15 +739,15 @@ write_consensus() {
       log "    [warn] consensus comment not written for $GH_OWNER/$repo#$num; next sweep will retry final sentinel"
     fi
   else
-    if ! dispatch_review_outcome "$repo" "$num" "$sha" "debate" "$engineer" "$evaluator" "ceo-debate" "" 0 "$comments"; then
+    if ! dispatch_review_outcome "$repo" "$num" "$sha" "debate" "$engineer" "$evaluator" "ceo-debate" "" 0 "$comments" "$author_mention" "$lane_mode"; then
       log "    [warn] review issue dispatch not ready for $GH_OWNER/$repo#$num; skipping final sentinel until next sweep"
       return 0
     fi
 
-    if post_pr_comment "$repo" "$num" "Reviewers disagree — escalating to the CEO for adjudication.
+    if post_pr_comment "$repo" "$num" "Reviewers disagree — escalating to the CEO for adjudication. The debate stays open until the CEO posts the resolution sentinel on this PR: \`<!-- ceo-resolved: $sha verdict: <approve|request-changes|block> -->\`.
 
-- Engineer (peer lane): $engineer
-- Evaluator (adversarial lane): $evaluator
+- $peer_lane_label: $engineer
+- $adv_lane_label: $evaluator
 
 <!-- debate: $sha -->"; then
       log "    debate engineer=$engineer evaluator=$evaluator"
@@ -630,6 +765,7 @@ log "[scan] enumerated $(echo "$REPOS" | wc -l | tr -d ' ') repos under $GH_OWNE
 REPOS_OK=0
 REPOS_ERRORED=0
 PRS_TOTAL=0
+PRS_FETCH_FAILED=0
 REVIEWS_REQUESTED=0
 
 while IFS= read -r repo; do
@@ -662,22 +798,87 @@ while IFS= read -r repo; do
     PRS_TOTAL=$((PRS_TOTAL + 1))
     pr_id="$GH_OWNER/$repo#$num@$sha"
 
-    body=$(pr_comments_body "$repo" "$num")
+    # A failed read is never treated as empty data — skip the PR for this
+    # sweep instead (state re-derives from the PR thread next run).
+    if ! body=$(pr_comments_body "$repo" "$num"); then
+      log "  [warn] fetch failed for PR comments on $pr_id; skipping this sweep"
+      PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
+      continue
+    fi
 
-    if has_final_sentinel "$body" "$sha"; then
-      log "  [done] $pr_id (consensus or debate already at this SHA)"
+    if has_consensus_sentinel "$body" "$sha"; then
+      log "  [done] $pr_id (consensus already at this SHA)"
+      continue
+    fi
+
+    if has_debate_sentinel "$body" "$sha"; then
+      # A debate is not terminal — it converges only via the CEO resolution
+      # sentinel `<!-- ceo-resolved: <sha> verdict: <...> -->` on the PR.
+      resolved_v=$(sentinel_verdict "$body" "ceo-resolved" "$sha")
+      if [[ -z "$resolved_v" ]]; then
+        log "  [waiting] $pr_id (debate open — waiting for CEO adjudication)"
+        continue
+      fi
+      case "$resolved_v" in
+        approve|request-changes|block) ;;
+        *)
+          log "  [warn] $pr_id ceo-resolved sentinel carries unrecognized verdict '$resolved_v'; still waiting for a valid CEO adjudication"
+          continue
+          ;;
+      esac
+      if [[ "$resolved_v" == "approve" ]]; then
+        close_review_issue_if_known "$repo" "$num" "$sha" "$body"
+      fi
+      # Non-approve: the CEO already owns rework from the adjudication —
+      # record the resolved verdict and stop. No new outcome comment.
+      if post_pr_comment "$repo" "$num" "CEO adjudication recorded: $resolved_v — debate resolved.
+
+<!-- consensus: $sha verdict: $resolved_v -->"; then
+        log "  [resolved] $pr_id (debate → $resolved_v)"
+      else
+        log "    [warn] resolution consensus comment not written for $GH_OWNER/$repo#$num; next sweep will retry"
+      fi
+      continue
+    fi
+
+    if ! pr_body_str=$(pr_body "$repo" "$num"); then
+      log "  [warn] fetch failed for PR body on $pr_id; skipping this sweep"
+      PRS_FETCH_FAILED=$((PRS_FETCH_FAILED + 1))
+      continue
+    fi
+    author_uuid=$(original_author_id_from_body "$pr_body_str")
+    author_mention=$(original_author_mention_from_body "$pr_body_str")
+    peer_agent=$(peer_engineer_for_author "$author_uuid")
+
+    evaluator_uuid=$(mention_agent_uuid "$EVALUATOR_MENTION")
+    if [[ -n "$author_uuid" && -n "$evaluator_uuid" && "$author_uuid" == "$evaluator_uuid" ]]; then
+      # Evaluator-authored PR: the adversarial lane must never self-review.
+      # Both lanes are carried by the two Engineer instances (peer:
+      # Engineer-A, adversarial checklist: Engineer-B); consensus accepts two
+      # `engineer-reviewed` sentinels from two distinct review comments as
+      # the two lanes (first = peer, second = adversarial).
+      eng_verdicts=$(sentinel_verdicts_all "$body" "engineer-reviewed" "$sha")
+      eng_count=0
+      [[ -n "$eng_verdicts" ]] && eng_count=$(printf '%s\n' "$eng_verdicts" | grep -c .)
+      if (( eng_count >= 2 )); then
+        v_peer=$(printf '%s\n' "$eng_verdicts" | sed -n '1p')
+        v_adv=$(printf '%s\n' "$eng_verdicts" | sed -n '2p')
+        write_consensus "$repo" "$num" "$sha" "$v_peer" "$v_adv" "$body" "$author_uuid" "$author_mention" "engineer-pair"
+      elif (( eng_count == 1 )); then
+        log "  [need-adversarial-engineer] $pr_id (evaluator-authored; first engineer verdict=$eng_verdicts)"
+        dispatch_review_request "$repo" "$num" "$sha" "$body" "$ENGINEER_B_AGENT" "adversarial-engineer" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
+      else
+        log "  [need-engineer-first] $pr_id (evaluator-authored; peer=$ENGINEER_A_AGENT)"
+        dispatch_review_request "$repo" "$num" "$sha" "$body" "$ENGINEER_A_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
+      fi
       continue
     fi
 
     engineer_v=$(sentinel_verdict "$body" "engineer-reviewed" "$sha")
     evaluator_v=$(sentinel_verdict "$body" "evaluator-reviewed" "$sha")
 
-    pr_body_str=$(pr_body "$repo" "$num")
-    author_uuid=$(original_author_id_from_body "$pr_body_str")
-    peer_agent=$(peer_engineer_for_author "$author_uuid")
-
     if [[ -n "$engineer_v" && -n "$evaluator_v" ]]; then
-      write_consensus "$repo" "$num" "$sha" "$engineer_v" "$evaluator_v" "$body" "$author_uuid"
+      write_consensus "$repo" "$num" "$sha" "$engineer_v" "$evaluator_v" "$body" "$author_uuid" "$author_mention"
     elif [[ -n "$engineer_v" ]]; then
       log "  [need-evaluator] $pr_id (engineer=$engineer_v)"
       dispatch_review_request "$repo" "$num" "$sha" "$body" "$EVALUATOR_AGENT" && REVIEWS_REQUESTED=$((REVIEWS_REQUESTED + 1))
@@ -691,5 +892,5 @@ while IFS= read -r repo; do
   done <<<"$prs_raw"
 done <<<"$REPOS"
 
-log "[summary] repos_ok=$REPOS_OK repos_errored=$REPOS_ERRORED prs_seen=$PRS_TOTAL"
+log "[summary] repos_ok=$REPOS_OK repos_errored=$REPOS_ERRORED prs_seen=$PRS_TOTAL prs_fetch_failed=$PRS_FETCH_FAILED"
 log "[done] sweep complete: review_requests=$REVIEWS_REQUESTED"

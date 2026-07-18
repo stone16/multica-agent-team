@@ -1,6 +1,6 @@
 # Pull Request Description Template
 
-> NOTE: this copy has diverged from `stone16/harness-template` pending an upstream sync.
+> NOTE: team-specific content in this file — the roster references, the routing preamble, and CEO escalation — is canonical in this repository. Only the generic six-section skeleton (Summary / Why / Approach / How I Tested / Rollback Plan / Out of Scope) tracks `stone16/harness-template`; sync from upstream only for team-agnostic structural changes.
 
 > This file is the **canonical source** for the PR description standard. `.github/PULL_REQUEST_TEMPLATE.md` is the minimum-threshold version shown to human contributors; this file is the full standard that code-shipping agents follow.
 
@@ -9,12 +9,12 @@ The unit of delivery is a Pull Request, not a commit. Code-shipping agents (the 
 A PR description with any required section empty is a draft, not a request for review.
 Open GitHub PRs as **Ready for review**, never as Draft PRs. If the body is not ready, do not open the PR yet. If GitHub creates the PR as draft anyway, run `gh pr ready` before handing it off.
 
-**Routing preamble** (appears above `## Summary`; both lines are machine-parsed by `.github/scripts/pr-sweep.sh` and the format is fixed):
+**Routing preamble** (appears above `## Summary`; the formats are fixed — only the `Original author:` line is machine-parsed by `.github/scripts/pr-sweep.sh`):
 
 Originating Multica issue: [STO-NNN](mention://issue/<uuid>)
 Original author: [@AgentName](mention://agent/<uuid>)
 
-> The originating-issue line names the Multica issue this PR closes; the parser extracts the UUID from the literal `mention://issue/<uuid>` form — free text like `closes #NNN` does not satisfy it. Required for every PR. The original-author line names the agent that opened the PR; when review consensus is `request-changes`, the sweep routes the feedback back to this agent for up to 3 iterations before escalating to a human. Required for agent-authored PRs; human-authored PRs may omit it (the loop then escalates directly to the CEO via `CEO_MENTION`).
+> The originating-issue line names the Multica issue this PR closes. It is a required traceability convention for every PR — keep the exact `mention://issue/<uuid>` form; free text like `closes #NNN` does not satisfy it — but the sweep does NOT parse it; reviewers and the CEO read it by hand. The original-author line names the agent that opened the PR and is the only machine-parsed preamble line: the sweep extracts the agent UUID to pick the peer review lane (the Engineer instance that did not author reviews) and to give the CEO author context. The sweep never routes rework to the author — on a non-approve consensus it posts a `ceo-followup` comment, and on lane disagreement a `ceo-debate` comment; the CEO dispatches rework, with an advisory cap of 3 iterations before escalating to a human. Required for agent-authored PRs; human-authored PRs may omit it (the peer lane then defaults to Engineer-A, and escalation still goes to the CEO via `CEO_MENTION`).
 
 ---
 

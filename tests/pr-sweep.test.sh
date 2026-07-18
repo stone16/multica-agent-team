@@ -114,6 +114,11 @@ if [[ "$1 $2" == "pr diff" ]]; then
 fi
 
 if [[ "$1 $2" == "pr view" ]]; then
+  if [[ "${PR_SWEEP_GH_VIEW_FAIL:-0}" == "1" ]]; then
+    printf 'simulated gh pr view failure\n' >&2
+    exit 1
+  fi
+
   if printf '%s\n' "$*" | grep -Fq -- "--json body"; then
     case "$scenario" in
       unreviewed-author-engineer-a|reviewed-with-action-items|reviewed-with-action-items-review-issue-exists|reviewed-with-action-items-iter-cap|reviewed-with-prose-mention-not-counted)
@@ -121,6 +126,9 @@ if [[ "$1 $2" == "pr view" ]]; then
         ;;
       unreviewed-author-engineer-b)
         printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nOriginal author: [@Engineer-B](mention://agent/bbbbbbbb-0000-0000-0000-000000000001)\n'
+        ;;
+      unreviewed-author-evaluator|evaluator-author-one-engineer-review|evaluator-author-two-engineer-reviews)
+        printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nOriginal author: [@Evaluator](mention://agent/eeeeeeee-0000-0000-0000-000000000001)\n'
         ;;
       reviewed-with-action-items-unrelated-author-mention)
         printf 'Originating Multica issue: [STO-42](mention://issue/12121212-1212-1212-1212-121212121212)\nThanks to [@Engineer-B](mention://agent/bbbbbbbb-0000-0000-0000-000000000001) for early feedback.\n'
@@ -133,6 +141,28 @@ if [[ "$1 $2" == "pr view" ]]; then
   fi
 
   if printf '%s\n' "$*" | grep -Fq -- "engineer-reviewed: deadbeef"; then
+    if [[ "$scenario" == "evaluator-author-two-engineer-reviews" ]]; then
+      # Pair mode: the sweep fetches the peer review with [-2] and the
+      # adversarial review with [-1] on the same sentinel name.
+      if printf '%s\n' "$*" | grep -Fq -- "[-2]"; then
+        cat <<'COMMENTS'
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+      else
+        cat <<'COMMENTS'
+Verdict: request-changes
+
+- src/app.ts:12 -- adversarial input path unguarded.
+
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
+      fi
+      exit 0
+    fi
     if [[ "$scenario" == "reviewed-debate" ]]; then
       cat <<'COMMENTS'
 Verdict: request-changes
@@ -275,6 +305,84 @@ Performance findings:
 
 <!-- evaluator-reviewed: deadbeef verdict: request-changes -->
 COMMENTS
+  elif [[ "$scenario" == "debate-unresolved" ]]; then
+    # A debate sentinel with no CEO resolution: the sweep must WAIT, not
+    # treat the PR as converged. The quoted resolution template in the prose
+    # must not parse as a real ceo-resolved sentinel.
+    cat <<'COMMENTS'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
+Verdict: approve
+
+<!-- evaluator-reviewed: deadbeef verdict: approve -->
+Reviewers disagree — escalating to the CEO for adjudication. The debate stays open until the CEO posts the resolution sentinel on this PR: `<!-- ceo-resolved: deadbeef verdict: <approve|request-changes|block> -->`.
+
+<!-- debate: deadbeef -->
+COMMENTS
+  elif [[ "$scenario" == "debate-ceo-resolved-approve" ]]; then
+    cat <<'COMMENTS'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
+Verdict: approve
+
+<!-- evaluator-reviewed: deadbeef verdict: approve -->
+Reviewers disagree — escalating to the CEO for adjudication.
+
+<!-- debate: deadbeef -->
+Adjudication: the peer-lane finding is a test-coverage nit; approving.
+
+<!-- ceo-resolved: deadbeef verdict: approve -->
+COMMENTS
+  elif [[ "$scenario" == "debate-ceo-resolved-request-changes" ]]; then
+    cat <<'COMMENTS'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
+Verdict: approve
+
+<!-- evaluator-reviewed: deadbeef verdict: approve -->
+Reviewers disagree — escalating to the CEO for adjudication.
+
+<!-- debate: deadbeef -->
+Adjudication: the regression test is required; I have dispatched rework.
+
+<!-- ceo-resolved: deadbeef verdict: request-changes -->
+COMMENTS
+  elif [[ "$scenario" == "evaluator-author-one-engineer-review" ]]; then
+    cat <<'COMMENTS'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+Verdict: approve
+
+What I checked:
+- src/app.ts:1 -- change is covered.
+
+<!-- engineer-reviewed: deadbeef verdict: approve -->
+COMMENTS
+  elif [[ "$scenario" == "evaluator-author-two-engineer-reviews" ]]; then
+    cat <<'COMMENTS'
+<!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
+Verdict: request-changes
+
+- src/app.ts:7 -- missing regression test.
+
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
+Verdict: request-changes
+
+- src/app.ts:12 -- adversarial input path unguarded.
+
+<!-- engineer-reviewed: deadbeef verdict: request-changes -->
+COMMENTS
   elif [[ "$scenario" == "reviewed-with-prose-mention-not-counted" ]]; then
     # Prose that quotes prior sentinels must not inflate the iteration
     # counter — only real `<!-- consensus: ... -->` sentinels count. One real
@@ -411,6 +519,7 @@ MULTICA
   PR_SWEEP_TEST_SCENARIO="$scenario" \
     PR_SWEEP_CAPTURE_DIR="$tmp/captures" \
     PR_SWEEP_PR_COMMENT_FAIL="${PR_SWEEP_PR_COMMENT_FAIL:-0}" \
+    PR_SWEEP_GH_VIEW_FAIL="${PR_SWEEP_GH_VIEW_FAIL:-0}" \
     PR_SWEEP_MULTICA_FAIL="${PR_SWEEP_MULTICA_FAIL:-0}" \
     PR_SWEEP_EXISTING_ORIGIN_COMMENT="${PR_SWEEP_EXISTING_ORIGIN_COMMENT:-0}" \
     LC_ALL=C \
@@ -561,7 +670,9 @@ test_nonapprove_consensus_escalates_to_ceo_not_author() {
   assert_contains "$tmp/captures/issue-comment-1.args" "11111111-1111-1111-1111-000000000001"
   assert_contains "$tmp/captures/issue-update-1.args" "--assignee CEO"
   assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
+  # The author identity appears ONLY as the backticked informational line —
+  # never as a live mention (leader-only routing).
+  assert_contains "$tmp/captures/issue-comment-1.md" '- Original author: `'"$ENGINEER_A_MENTION_LINK"'`'
   assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_B_MENTION_LINK"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "$EVALUATOR_MENTION_LINK"
   assert_contains "$tmp/captures/issue-comment-1.md" "dispatch rework to the PR's author agent"
@@ -593,7 +704,7 @@ test_iteration_cap_is_advisory_and_flagged_to_ceo() {
   assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
   assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-comment-1.md" '- Original author: `'"$ENGINEER_A_MENTION_LINK"'`'
   assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_B_MENTION_LINK"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Rework iterations so far: 3 (cap: 3 — reached; advisory: escalate to the human instead of dispatching rework)"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
@@ -612,6 +723,7 @@ test_missing_original_author_escalates_to_ceo() {
   assert_pr_comment_count "$tmp/captures" 2
   assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
   assert_contains "$tmp/captures/issue-comment-1.md" "no \`Original author:"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Original author: unknown (human-authored or preamble unparseable) — no agent rework target; treat as human-owned"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
   assert_contains "$tmp/captures/issue-comment-1.md" "## Discussion Protocol"
   assert_contains "$tmp/captures/issue-comment-1.md" 'Reply to each reviewer finding in this issue with one of: `will-fix`, `already-fixed`, `wont-fix`, or `needs-discussion`.'
@@ -630,6 +742,9 @@ test_unrelated_agent_mentions_do_not_route_rework() {
   assert_update_count "$tmp/captures" 1
   assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_B_MENTION_LINK"
+  # The thank-you mention in the PR body is not an `Original author:` line —
+  # the outcome comment must report the author as unknown.
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Original author: unknown (human-authored or preamble unparseable) — no agent rework target; treat as human-owned"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "- Action: author-iteration"
   assert_contains "$tmp/captures/issue-comment-1.md" "- Action: ceo-followup"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
@@ -646,7 +761,7 @@ test_prior_prose_sentinels_do_not_inflate_iteration_count() {
   assert_contains "$tmp/captures/issue-comment-1.md" "- Rework iteration 2 of 3 for this PR (advisory"
   assert_not_contains "$tmp/captures/issue-comment-1.md" "cap: 3 — reached"
   assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
-  assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_A_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-comment-1.md" '- Original author: `'"$ENGINEER_A_MENTION_LINK"'`'
   assert_not_contains "$tmp/captures/issue-comment-1.md" "$ENGINEER_B_MENTION_LINK"
 }
 
@@ -681,7 +796,130 @@ test_debate_routes_to_ceo_in_pr_review_issue() {
   assert_not_contains "$tmp/captures/issue-comment-1.md" "evaluator-reviewed:"
   assert_contains "$tmp/captures/pr-comment.md" "- Engineer (peer lane): request-changes"
   assert_contains "$tmp/captures/pr-comment.md" "- Evaluator (adversarial lane): approve"
+  # The debate comment names the exact resolution sentinel the CEO must post.
+  assert_contains "$tmp/captures/pr-comment.md" 'ceo-resolved: deadbeef verdict: <approve|request-changes|block>'
   assert_contains "$tmp/captures/pr-comment.md" "<!-- debate: deadbeef -->"
+}
+
+# A debate sentinel is NOT terminal. Without a CEO resolution sentinel the
+# sweep waits — it must neither re-dispatch nor treat the PR as converged.
+test_debate_without_resolution_waits_for_ceo() {
+  local tmp
+  tmp="$(run_sweep_with_stubs debate-unresolved)"
+
+  assert_status "$tmp" 0
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
+  assert_pr_comment_count "$tmp/captures" 0
+  assert_update_count "$tmp/captures" 0
+  assert_contains "$tmp/stderr.log" "waiting for CEO adjudication"
+}
+
+# debate + ceo-resolved for the SAME sha with verdict approve → the sweep
+# writes the final consensus sentinel with the resolved verdict and marks the
+# review issue done.
+test_debate_with_ceo_resolution_approve_converges_and_closes_issue() {
+  local tmp
+  tmp="$(run_sweep_with_stubs debate-ceo-resolved-approve)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
+  assert_pr_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: approve -->"
+  assert_update_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-update-1.args" "11111111-1111-1111-1111-000000000001"
+  assert_contains "$tmp/captures/issue-update-1.args" "--status done"
+  assert_contains "$tmp/stderr.log" "[resolved] stone16/sample-repo#12@deadbeef (debate → approve)"
+}
+
+# debate + ceo-resolved non-approve → the CEO already owns rework from the
+# adjudication: the sweep records the consensus sentinel with the resolved
+# verdict and stops — no new outcome comment, no issue reassignment.
+test_debate_with_ceo_resolution_nonapprove_records_without_new_outcome() {
+  local tmp
+  tmp="$(run_sweep_with_stubs debate-ceo-resolved-request-changes)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
+  assert_update_count "$tmp/captures" 0
+  assert_pr_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/pr-comment.md" "CEO adjudication recorded: request-changes — debate resolved."
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
+  assert_contains "$tmp/stderr.log" "[resolved] stone16/sample-repo#12@deadbeef (debate → request-changes)"
+}
+
+# A failed gh read must never look like empty data: the PR is skipped for
+# this sweep with zero writes and the failure is counted.
+test_pr_fetch_failure_skips_pr_without_decisions() {
+  local tmp
+  tmp="$(PR_SWEEP_GH_VIEW_FAIL=1 run_sweep_with_stubs unreviewed)"
+
+  assert_status "$tmp" 0
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 0
+  assert_pr_comment_count "$tmp/captures" 0
+  assert_update_count "$tmp/captures" 0
+  assert_contains "$tmp/stderr.log" "fetch failed"
+  assert_contains "$tmp/stderr.log" "skipping this sweep"
+  assert_contains "$tmp/stderr.log" "prs_fetch_failed=1"
+}
+
+# Lane guard: when the Evaluator authored the PR, the adversarial lane must
+# not self-review. The peer lane goes to Engineer-A first.
+test_evaluator_authored_pr_dispatches_engineer_a_peer_first() {
+  local tmp
+  tmp="$(run_sweep_with_stubs unreviewed-author-evaluator)"
+
+  assert_file_count "$tmp/captures" 1
+  assert_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-1.args" "--assignee Engineer-A"
+  assert_not_contains "$tmp/captures/issue-1.args" "--assignee Evaluator"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: engineer-a -->"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- engineer-reviewed: <head-sha> verdict: <approve|request-changes|block> -->"
+  assert_contains "$tmp/stderr.log" "[need-engineer-first] stone16/sample-repo#12@deadbeef (evaluator-authored; peer=Engineer-A)"
+}
+
+# Lane guard: after the first engineer review on an Evaluator-authored PR,
+# the adversarial checklist is dispatched to Engineer-B, who still writes the
+# engineer-reviewed sentinel (never evaluator-reviewed).
+test_evaluator_authored_pr_dispatches_engineer_b_for_adversarial_lane() {
+  local tmp
+  tmp="$(run_sweep_with_stubs evaluator-author-one-engineer-review)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
+  assert_update_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee Engineer-B"
+  assert_contains "$tmp/captures/issue-comment-1.md" "Engineer-B review is requested"
+  assert_contains "$tmp/captures/issue-comment-1.md" "the adversarial lane on an Evaluator-authored PR"
+  assert_contains "$tmp/captures/issue-comment-1.md" 'write the `engineer-reviewed` sentinel (never `evaluator-reviewed`)'
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- engineer-reviewed: <head-sha> verdict: <approve|request-changes|block> -->"
+  assert_not_contains "$tmp/captures/issue-comment-1.md" "<!-- evaluator-reviewed: <head-sha>"
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- multica-review-requested: deadbeef agent: engineer-b -->"
+}
+
+# Lane guard consensus: two engineer-reviewed sentinels from two distinct
+# review comments are the two lanes for an Evaluator-authored PR (first =
+# peer, second = adversarial), with lane attribution in the outcome comment.
+test_evaluator_authored_pr_two_engineer_sentinels_reach_consensus() {
+  local tmp
+  tmp="$(run_sweep_with_stubs evaluator-author-two-engineer-reviews)"
+
+  assert_file_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
+  assert_update_count "$tmp/captures" 1
+  assert_pr_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-comment-1.md" "$CEO_MENTION_LINK"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Final verdict: consensus: request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Peer lane verdict (Engineer): request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" "- Adversarial lane verdict (Engineer — Evaluator-authored PR): request-changes"
+  assert_contains "$tmp/captures/issue-comment-1.md" '- Original author: `'"$EVALUATOR_MENTION_LINK"'`'
+  assert_contains "$tmp/captures/issue-comment-1.md" "## Peer Lane Review (Engineer)"
+  assert_contains "$tmp/captures/issue-comment-1.md" "## Adversarial Lane Review (Engineer — Evaluator-authored PR)"
+  assert_contains "$tmp/captures/issue-comment-1.md" "missing regression test."
+  assert_contains "$tmp/captures/issue-comment-1.md" "adversarial input path unguarded."
+  assert_contains "$tmp/captures/issue-update-1.args" "--assignee CEO"
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: request-changes -->"
 }
 
 test_existing_review_outcome_prevents_duplicate_when_final_comment_fails() {
@@ -759,6 +997,13 @@ test_unrelated_agent_mentions_do_not_route_rework
 test_prior_prose_sentinels_do_not_inflate_iteration_count
 test_approve_consensus_closes_existing_review_issue_without_ceo
 test_debate_routes_to_ceo_in_pr_review_issue
+test_debate_without_resolution_waits_for_ceo
+test_debate_with_ceo_resolution_approve_converges_and_closes_issue
+test_debate_with_ceo_resolution_nonapprove_records_without_new_outcome
+test_pr_fetch_failure_skips_pr_without_decisions
+test_evaluator_authored_pr_dispatches_engineer_a_peer_first
+test_evaluator_authored_pr_dispatches_engineer_b_for_adversarial_lane
+test_evaluator_authored_pr_two_engineer_sentinels_reach_consensus
 test_existing_review_outcome_prevents_duplicate_when_final_comment_fails
 test_multica_dispatch_failure_does_not_abort_sweep
 test_review_outcome_failure_does_not_write_final_sentinel

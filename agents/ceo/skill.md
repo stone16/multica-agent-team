@@ -43,8 +43,8 @@ Stay scoped. Do not rewrite or expand work outside the current issue's stated sc
 | Re-trigger: Evaluator verification delivery | PASS → step done, next dispatch or close; FAIL → rework to the step's ORIGINAL executor (never the Evaluator); unclear → ask the human — State 3 |
 | Re-trigger: human comment or cross-reference | Route it, or exit silently if no action is needed — State 4 |
 | All plan steps done | Completion summary — State 5 |
-| pr-sweep `ceo-followup` comment (agreed request-changes/block) | Rework dispatch to the PR's author agent with a DoD referencing the review findings, honoring the advisory iteration count (>3 → escalate to the human instead) — see PR Review Adjudication below |
-| pr-sweep `ceo-debate` comment | Deciding vote (approve / request-changes / block) + per-finding replies per the Discussion Protocol |
+| pr-sweep `ceo-followup` comment (agreed request-changes/block) | Rework dispatch to the PR's author agent (read from the outcome comment's `- Original author:` line) with a DoD referencing the review findings. When the advisory line reports the cap (3) is reached, escalate to the human instead of dispatching — never authorize a fourth iteration — see PR Review Adjudication below |
+| pr-sweep `ceo-debate` comment | Deciding vote (approve / request-changes / block) + per-finding replies per the Discussion Protocol + the `ceo-resolved` resolution sentinel posted on the PR |
 | Human asks for a build-vs-buy or pivot decision | A change-proposal-formatted analysis (template below) |
 | Human asks a scope question | A direct yes/no on whether the expansion serves the underlying user constraint |
 
@@ -141,10 +141,18 @@ The pr-sweep loop runs two review lanes per PR head SHA — a peer Engineer lane
 
 | Action | Meaning | Your move |
 |---|---|---|
-| `ceo-followup` | Both lanes agree on `request-changes` or `block`. The sweep does not route to authors — rework routing is yours | Dispatch rework to the PR's author agent (from the outcome comment's `Original author:` context) as a delegation comment with a DoD referencing the review findings. Honor the ADVISORY rework-iteration count in the outcome comment: if it shows the cap reached (more than 3 rework iterations for the PR), do NOT dispatch — escalate to the human instead. When the author cannot be identified (`Original author:` line missing), decide: identify an owner and route, hand off, close, or override |
-| `ceo-debate` | The engineer and evaluator verdicts disagree at the head SHA | Cast the deciding vote: `approve` / `request-changes` / `block`, with the constraint that decided it |
+| `ceo-followup` | Both lanes agree on `request-changes` or `block`. The sweep does not route to authors — rework routing is yours | Read the author from the outcome comment's `- Original author:` line (the backticked mention markdown is the rework target) and dispatch rework to that agent as a delegation comment with a DoD referencing the review findings. Honor the ADVISORY rework-iteration count in the outcome comment: when the advisory line reports the cap (3) is reached, do NOT dispatch — escalate to the human instead; never authorize a fourth iteration. When the line reads `Original author: unknown (human-authored or preamble unparseable)`, there is no agent rework target — treat the PR as human-owned and decide: hand off, close, or override |
+| `ceo-debate` | The engineer and evaluator verdicts disagree at the head SHA | Cast the deciding vote: `approve` / `request-changes` / `block`, with the constraint that decided it. Then post the resolution sentinel on the PR (mandatory — see below) |
 
-A `ceo-followup` rework dispatch follows the normal DoD Dispatch Protocol: one delegation comment @-mentioning the author agent, an inline `dod:` block whose `outcome` is the resolution of the review findings and whose `evidence` names each finding and the resolving commit, and `max_rounds` respected. The advisory iteration count in the sweep's outcome comment is the round counter for this loop — the script no longer enforces the cap; you do.
+**Resolution sentinel (mandatory after every `ceo-debate` adjudication).** After casting the deciding vote in the Multica issue, you MUST post a comment on the PR itself ending with the resolution sentinel, exactly:
+
+```
+<!-- ceo-resolved: <head-sha> verdict: <approve|request-changes|block> -->
+```
+
+using the same head SHA the debate sentinel carries. That sentinel is what lets the sweep converge: on the next run it writes the final consensus sentinel with your resolved verdict and finishes the PR (approve → the review issue is marked done; non-approve → you already own the rework from this adjudication, so dispatch it — the sweep records the verdict and posts no new outcome comment). Without the sentinel the debate stays open and the sweep waits indefinitely.
+
+A `ceo-followup` rework dispatch follows the normal DoD Dispatch Protocol: one delegation comment @-mentioning the author agent, an inline `dod:` block whose `outcome` is the resolution of the review findings and whose `evidence` names each finding and the resolving commit, and `max_rounds` respected. The advisory iteration count in the sweep's outcome comment is the round counter for this loop — the script no longer enforces the cap; you do. The cap is 3: the moment the advisory line reports it reached, the only valid move is human escalation — a fourth rework iteration is never authorized.
 
 Discussion Protocol for both action kinds:
 

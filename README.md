@@ -11,7 +11,7 @@ This repo is being prepared for open-sourcing. Tracked files use neutral roster 
 | `workspace-context.md` | Team constitution, applies to every agent | `workspace.context` field |
 | `agents/<role>/personality.md` | Agent persona in 4 sections: Identity / Personal Goal / Touchstone / Constraints. Narrative for the first three; imperative bullets for Constraints | `agent.instructions` field |
 | `agents/<role>/skill.md` | Agent operational rules — imperative, written in harness-template style. Self-contained per agent (no cross-references) | One Multica skill, mounted on the agent(s) for that profession |
-| `templates/*.md` | Local reference copies of `stone16/harness-template` artifact templates. Not synced to Multica — agents inline them in their own `skill.md` | — |
+| `templates/*.md` | Output templates. Team-specific content (roster, routing preamble) is canonical here; only the generic section skeleton mirrors `stone16/harness-template`. Not synced to Multica — agents inline them in their own `skill.md` | — |
 | `scripts/sync-multica.sh` | Bridge from this repo to the Multica server (Multica has no git-sync). See "Syncing to Multica" | `multica skill update` / `multica agent update` |
 | `.github/workflows/pr-sweep.yml` + `.github/scripts/pr-sweep.sh` + `tests/pr-sweep.test.sh` | Automated PR review chain. See "PR-Sweep Automation" | One Multica review issue per PR |
 
@@ -101,7 +101,7 @@ GitHub also preloads `.github/PULL_REQUEST_TEMPLATE.md` in this repo. Keep it st
 
 Agent-created PRs must be opened as Ready for review, never as GitHub Draft PRs. If the body is not filled, the agent keeps working locally instead of opening a placeholder PR.
 
-If a template needs to change, change it in `stone16/harness-template` first, then mirror here, then update each agent's `skill.md` that inlines it.
+Ownership rule: team-specific template content — the roster, the routing preamble (`Originating Multica issue:` / `Original author:` lines), and any squad-protocol wording — is canonical IN THIS REPO. Only the generic section skeleton mirrors `stone16/harness-template`, and upstream sync is for team-agnostic structure only: pull structural changes (new/renamed sections) from upstream, never push or overwrite the team-specific content here from it. After a template change, update each agent's `skill.md` that inlines it.
 
 ## PR-Sweep Automation
 
@@ -111,7 +111,7 @@ The team's automated code-review chain runs as a GitHub Action in this repo:
 |---|---|
 | `.github/workflows/pr-sweep.yml` | Cron schedule (`*/15 * * * *`) + injects operational identity from secrets/variables + invokes the script |
 | `.github/scripts/pr-sweep.sh` | Deterministic filter — enumerates open PRs across all non-archived `stone16/*` repos, decides which need review, creates or reuses one Multica issue per PR, and routes reconciled outcomes back to that same issue |
-| `tests/pr-sweep.test.sh` | Unit tests for sentinel parsing, peer-lane pick, iteration counting, and routing |
+| `tests/pr-sweep.test.sh` | Unit tests for sentinel parsing, peer-lane pick, iteration counting, routing, debate convergence via `ceo-resolved`, read-failure skipping, and the Evaluator-authored lane guard |
 | `.pr-sweep-ignore` | Transition-era fallback exclusion list; superseded by the `PR_SWEEP_IGNORE` Actions variable |
 
 ### Why this shape
@@ -120,12 +120,16 @@ The cost driver in agent-driven workflows is **agent invocations**, not script r
 
 The review prompt follows the Claude Code review shape we want to emulate: review the current PR head, focus on production-impacting bugs instead of style nits, require evidence in each finding, and leave a machine-readable marker after a real review. We keep that as Markdown prompt and Bash, not a new review service.
 
+**Read-failure discipline**: every GitHub read in the script distinguishes an API failure from genuinely-empty data. Any failed read for a PR logs a `fetch failed … skipping this sweep` warning, increments the `prs_fetch_failed` counter in the sweep summary, and skips that PR entirely for the run — sentinel state is re-derived from the PR thread on the next sweep, so skipping is safe by design. No decision (peer-lane pick, dispatch, consensus, final sentinel) is ever made from error-empty data.
+
 ### Review lanes
 
 Every PR — including documentation-only PRs — gets two independent reviews at the current head SHA; this is not a rotation:
 
-- **Engineer peer lane** — general code quality, carried by the Engineer instance that did NOT author the PR. If Engineer-A authored, Engineer-B reviews, and vice versa; for non-Engineer authors (Evaluator, PM, human, or an unmapped author), the default is Engineer-A. The author is read from the machine-parsed `Original author: [@AgentName](mention://agent/<uuid>)` line in the PR body, so instances can share one bot login without ever reviewing their own PR.
+- **Engineer peer lane** — general code quality, carried by the Engineer instance that did NOT author the PR. If Engineer-A authored, Engineer-B reviews, and vice versa; for non-Engineer authors (PM, human, or an unmapped author), the default is Engineer-A. The author is read from the machine-parsed `Original author: [@AgentName](mention://agent/<uuid>)` line in the PR body, so instances can share one bot login without ever reviewing their own PR.
 - **Evaluator adversarial lane** — security, performance, dependency risk, adversarial inputs.
+
+**Evaluator-authored PRs** are the exception: the adversarial lane never self-reviews. When the PR body's `Original author:` UUID matches `EVALUATOR_MENTION`, the sweep carries BOTH lanes with the two Engineer instances — Engineer-A takes the peer lane, then Engineer-B runs the adversarial checklist. Both write the `engineer-reviewed` sentinel (never `evaluator-reviewed`), and consensus for that PR accepts two `engineer-reviewed` sentinels from two distinct review comments as the two lanes (first = peer, second = adversarial). The review-request text carries the lane attribution, and the outcome comment labels the lanes explicitly.
 
 The lenses differ, but the evidence bar is identical: check out the PR head SHA into an isolated Multica worktree for full-repo context, `file:line` findings, production-impacting issues first, explicit verification status, strict verdict word, and no sentinel without a real review. The lanes do not coordinate in advance; the script reconciles the two verdicts.
 
@@ -164,11 +168,19 @@ Both Engineer instances write `engineer-reviewed` — the sentinel is lane-scope
 When both lanes have written sentinels for the same SHA, the script writes one of:
 
 ```
-<!-- consensus: <sha> verdict: <agreed-verdict> -->     # both agree
-<!-- debate: <sha> -->                                   # they disagree → escalate to the CEO
+<!-- consensus: <sha> verdict: <agreed-verdict> -->     # both agree — terminal for this SHA
+<!-- debate: <sha> -->                                   # they disagree → escalate to the CEO — NOT terminal
 ```
 
-The next sweep skips PRs that already have a final sentinel for the current SHA. New commits invalidate the sentinel automatically (different SHA).
+Only the consensus sentinel is terminal: the next sweep skips PRs that already have a consensus sentinel for the current SHA. New commits invalidate sentinels automatically (different SHA).
+
+A debate converges through the CEO resolution sentinel. After casting the deciding vote in the Multica review issue, the CEO posts on the PR, exactly:
+
+```
+<!-- ceo-resolved: <head-sha> verdict: <approve|request-changes|block> -->
+```
+
+The sweep then reconciles: debate + `ceo-resolved` for the SAME SHA → it writes the final consensus sentinel with the resolved verdict and finishes the PR (approve → the review issue is marked done; non-approve → the CEO already owns rework from the adjudication, so the sweep records the verdict and posts no new outcome comment). A debate without a `ceo-resolved` sentinel is logged as waiting for CEO adjudication and skipped — never treated as converged.
 
 Each PR gets exactly one Multica review issue. The PR URL is the logical idempotency key; the durable mapping is stored on that PR thread as:
 
@@ -184,8 +196,8 @@ When both lanes have verdicts, the script reconciles and posts one Multica comme
 
 | `Action:` value | Recipient | When |
 |---|---|---|
-| `ceo-followup` | `CEO_MENTION` | Both lanes agree on `request-changes` or `block`. The CEO dispatches rework to the PR's author agent (delegation comment with a DoD referencing the review findings). The outcome comment carries an ADVISORY rework-iteration count ("rework iteration N of `MAX_REVIEW_ITERATIONS`", default cap 3 distinct non-approve head SHAs) — the script no longer enforces the cap; the CEO does, escalating to the human instead of dispatching once the cap is reached. A missing `Original author:` line is noted so the CEO knows the author cannot be identified |
-| `ceo-debate` | `CEO_MENTION` | The lanes disagree. CEO casts the deciding vote in the same issue |
+| `ceo-followup` | `CEO_MENTION` | Both lanes agree on `request-changes` or `block`. The CEO dispatches rework to the PR's author agent (delegation comment with a DoD referencing the review findings). The outcome comment carries a `- Original author:` line — either the exact mention markdown parsed from the PR body, wrapped in backticks so it stays informational and never acts as a live mention, or `unknown (human-authored or preamble unparseable) — no agent rework target; treat as human-owned`. It also carries an ADVISORY rework-iteration count ("rework iteration N of `MAX_REVIEW_ITERATIONS`", default cap 3 distinct non-approve head SHAs) — the script no longer enforces the cap; the CEO does, escalating to the human instead of dispatching once the advisory line reports the cap reached (a fourth iteration is never authorized) |
+| `ceo-debate` | `CEO_MENTION` | The lanes disagree. CEO casts the deciding vote in the same issue, then posts the `ceo-resolved` resolution sentinel on the PR — that sentinel is what lets the next sweep converge the debate |
 
 Follow-up is discussion-first, not blind stale-marking: each finding gets a `will-fix` / `already-fixed` / `wont-fix` / `needs-discussion` reply, the thread stays unresolved until the parties agree, and a summary comment lands before resolution. The CEO never implements fixes itself — a `will-fix` from the CEO means a routed dispatch. Rework reaches the author only as a CEO delegation comment; the author then pushes fixes to the PR branch and the next sweep re-runs both lanes at the new head SHA.
 
@@ -227,7 +239,7 @@ Dry-run is the default; only `--apply` writes. Auth is ambient (`multica login` 
 ## Do Not
 
 - Do not introduce a shared `skills/` folder. Each agent owns its full skill content.
-- Do not edit `templates/*.md` locally — mirror from upstream.
+- Do not overwrite team-specific template content (roster, routing preamble) from upstream — it is canonical in this repo; only the generic section skeleton mirrors `stone16/harness-template`.
 - Do not introduce a new profession without an entry in the Roster table and a corresponding `agents/<role>/` folder with both files, then a re-sync.
 - Do not let anyone but the CEO @-mention an agent, and the CEO only in delegation comments. Members' delivery comments are mention-free — that is what returns control to the leader and what keeps mention cycles structurally impossible.
 - Do not dispatch work without an inline DoD block, and do not close a step whose delivery has not addressed every `dod.evidence` item.
