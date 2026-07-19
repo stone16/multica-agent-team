@@ -118,7 +118,11 @@ The sync scripts are intentionally dry-run by default. Applying changes requires
 
 This repository is an evolving operating model. Contributions should preserve the separation between profession, instance, Squad, run, and ledger. Before opening a change, read [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md); they are required to remain byte-identical.
 
-There is currently no license file in the repository. Treat reuse and redistribution as not yet formally licensed until the maintainers add an explicit license.
+### License and attribution
+
+This project is open source under the [Apache License 2.0](LICENSE). You may use, modify, and distribute it subject to the license requirements, including retaining applicable copyright, license, and [NOTICE](NOTICE) attribution information and adding prominent notices to modified files.
+
+Forks and derivative projects may accurately state that they are based on Multica Agent Team, but must not imply official status or maintainer endorsement. See the [trademark and attribution policy](TRADEMARKS.md) for details. For citation metadata, see [CITATION.cff](CITATION.cff).
 
 ## About / 关于本项目
 
