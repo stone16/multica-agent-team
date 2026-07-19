@@ -93,4 +93,8 @@ Multica Agent Team 是一个以证据为驱动的多 Agent 协作操作模型：
 
 GitHub Topics 已围绕 Multica 和实际仓库内容配置，包括 `multica`、`multica-ai`、`multica-agents`、`multica-platform`、`ai-agents`、`multi-agent-systems`、`agent-orchestration`、`ai-agent-team`、`ai-workflows` 和 `llm`。Multica 是主关键词，其他标签用于覆盖相关的 AI Agent 搜索场景。
 
-当前仓库还没有 license 文件。在维护者补充明确许可证之前，请将复用和再分发视为尚未正式授权。
+## 许可证与署名
+
+本项目采用 [Apache License 2.0](LICENSE) 开源。你可以使用、修改和分发本项目，但必须遵守许可证要求，包括保留适用的版权、许可证和 [NOTICE](NOTICE) 署名信息，并在修改过的文件中作出显著说明。
+
+Fork 和衍生项目可以如实说明其基于 Multica Agent Team，但不得暗示其为官方版本或获得维护者背书。详情见 [商标与署名政策](TRADEMARKS.md)。如需在文章、研究或其他项目中引用，请使用 [CITATION.cff](CITATION.cff) 中的元数据。

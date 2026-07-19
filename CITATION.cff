@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+message: "If you use this project, please cite it using the metadata below."
+title: "Multica Agent Team"
+type: software
+authors:
+  - name: "Stone (@stone16)"
+repository-code: "https://github.com/stone16/multica-agent-team"
+license: Apache-2.0
