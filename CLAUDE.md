@@ -36,7 +36,7 @@ The company keeps seven reusable Profession Profiles:
 
 | Profession | Stable responsibility | Deployment intent |
 |---|---|---|
-| Orchestrator | Own the objective, compose the smallest sufficient team, dispatch with a DoD, verify, and close | Claude runtime; one `claude-sonnet-5` instance initially |
+| Orchestrator | Own the objective, compose the smallest sufficient team, dispatch with a DoD, verify, and close | Claude runtime; one `claude-opus-4-8` instance initially |
 | PM | Define user value, scope, PRDs, acceptance criteria, and product decisions | Claude runtime |
 | Designer | Define journeys, interactions, prototypes, and experience-quality decisions | Claude runtime |
 | Engineer | Design and implement correct, observable, reversible systems | Two Codex instances: Engineer-A and Engineer-B; both `gpt-5.6-sol` |

@@ -28,7 +28,7 @@ Seven professions, flat — vertical tiers are abolished. One directory per prof
 
 | # | Profession | Path | Runtime / model (desired) | Focus |
 |---|---|---|---|---|
-| 1 | Orchestrator | `agents/orchestrator/` | Claude / Sonnet 5 | Objective ownership, role activation, DoD dispatch, verification, closure, PR-review adjudication |
+| 1 | Orchestrator | `agents/orchestrator/` | Claude / Opus 4.8 | Objective ownership, role activation, DoD dispatch, verification, closure, PR-review adjudication |
 | 2 | PM | `agents/pm/` | Claude / Opus 4.8 | PRD, issue split, product decisions and review |
 | 3 | Designer | `agents/designer/` | Claude / Opus 4.8 | User journey, UX/UI, prototype and design review |
 | 4 | Engineer | `agents/engineer/` | Two Codex instances, both `gpt-5.6-sol` | Implementation and non-author peer review |

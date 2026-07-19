@@ -3,7 +3,7 @@
     "logical_id": "orchestrator",
     "profession": "orchestrator",
     "runtime_provider": "claude",
-    "model": "claude-sonnet-5",
+    "model": "claude-opus-4-8",
     "legacy_skill_names": ["CEO Skill"]
   },
   {
