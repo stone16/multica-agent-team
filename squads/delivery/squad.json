@@ -1,0 +1,17 @@
+{
+  "name": "Delivery",
+  "description": "Convert an accepted product definition into correct, reviewed, reversible, and shippable behavior.",
+  "leader": "orchestrator",
+  "members": [
+    {"agent": "pm", "role": "Default — clarify product intent and verify user-visible outcome"},
+    {"agent": "designer", "role": "Default for user-facing work — resolve interaction decisions and review experience"},
+    {"agent": "engineer-a", "role": "Default implementation lane and peer reviewer for Engineer-B"},
+    {"agent": "engineer-b", "role": "Default implementation lane and peer reviewer for Engineer-A"},
+    {"agent": "evaluator-a", "role": "Default independent behavioral and adversarial verification lane"},
+    {"agent": "evaluator-b", "role": "Optional second independent evaluator for high-risk work"}
+  ],
+  "entry_criteria": ["An accepted PRD or bounded change contract has testable acceptance criteria"],
+  "outputs": ["Ready-for-review pull request", "tests and operational evidence", "independent verdict", "documented deviations"],
+  "exit_criteria": ["Acceptance criteria and required review gates pass", "rollback and residual risk are explicit"],
+  "handoff_targets": ["Experience", "Growth", "Reliability"]
+}

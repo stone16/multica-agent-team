@@ -60,8 +60,8 @@ MARKER_RETRY_DELAY="${PR_SWEEP_RETRY_DELAY:-2}"
 # Assignee names as Multica knows them (`multica issue ... --assignee <name>`).
 ENGINEER_A_AGENT="${ENGINEER_A_AGENT:-Engineer-A}"
 ENGINEER_B_AGENT="${ENGINEER_B_AGENT:-Engineer-B}"
-EVALUATOR_AGENT="${EVALUATOR_AGENT:-Evaluator}"
-CEO_AGENT="${CEO_AGENT:-CEO}"
+EVALUATOR_AGENT="${EVALUATOR_AGENT:-Evaluator-A}"
+CEO_AGENT="${CEO_AGENT:-Orchestrator}"
 
 # Mention links in the `[@Name](mention://agent/<uuid>)` form. Operational
 # values live in GitHub Actions variables — never commit agent UUIDs to this

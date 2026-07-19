@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync-multica.sh — push repo desired state (agents/<role>/) to the Multica server.
+# sync-multica.sh — push profession content to the Multica server.
 #
 # Multica has no git-sync: agent instructions and skills live server-side.
 # This script is the bridge from this repo to the server:
@@ -17,7 +17,7 @@
 #
 # Mapping conventions (override via env when server naming differs):
 #   skill name  : "<Display> Skill" (CEO Skill, Engineer Skill, ...)
-#                 override: SYNC_SKILL_<ROLE>  (e.g. SYNC_SKILL_CEO="CEO Skill")
+#                 override: SYNC_SKILL_<ROLE>
 #   agent names : display name; engineer maps to BOTH instances
 #                 (Engineer-A + Engineer-B — they share one profession dir)
 #                 override: SYNC_AGENT_<ROLE>  (comma-separated names or ids)
@@ -32,7 +32,7 @@
 #
 # Usage:
 #   scripts/sync-multica.sh                  # dry run, all roles
-#   scripts/sync-multica.sh --agent ceo      # dry run, one role
+#   scripts/sync-multica.sh --agent orchestrator  # dry run, one role
 #   scripts/sync-multica.sh --apply          # execute, all roles
 #   scripts/sync-multica.sh --apply --agent engineer
 #   scripts/sync-multica.sh --verify         # read-only; nonzero on any drift
@@ -227,6 +227,8 @@ agent_targets_for() {
     printf '%s' "${!override_var}"
   elif [[ "$role" == "engineer" ]]; then
     printf 'Engineer-A,Engineer-B'
+  elif [[ "$role" == "evaluator" ]]; then
+    printf 'Evaluator-A,Evaluator-B'
   else
     display_name "$role"
   fi

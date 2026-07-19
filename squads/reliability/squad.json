@@ -1,0 +1,17 @@
+{
+  "name": "Reliability",
+  "description": "Maintain service reliability, safety, incident response, and long-term product health with measurable evidence.",
+  "leader": "orchestrator",
+  "members": [
+    {"agent": "engineer-a", "role": "Default — triage, diagnosis, remediation, automation, and operational ownership"},
+    {"agent": "engineer-b", "role": "Default peer lane or alternate responder; never self-review"},
+    {"agent": "evaluator-a", "role": "Default — reproduce incidents and independently verify fixes and regressions"},
+    {"agent": "evaluator-b", "role": "Optional second independent security or high-severity verification lane"},
+    {"agent": "pm", "role": "Optional — prioritize product impact, maintenance tradeoffs, and user communication"},
+    {"agent": "designer", "role": "Optional — investigate and verify recurring UX failures"}
+  ],
+  "entry_criteria": ["An incident, defect pattern, reliability risk, maintenance obligation, or product-health regression needs an owner"],
+  "outputs": ["Triage and impact record", "verified remediation", "incident or maintenance report", "structural follow-up"],
+  "exit_criteria": ["Service health is restored or risk is explicitly accepted", "recurrence controls and owners are recorded"],
+  "handoff_targets": ["Discovery", "Experience", "Delivery", "Growth"]
+}

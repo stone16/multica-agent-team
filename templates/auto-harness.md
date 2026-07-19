@@ -6,7 +6,7 @@ code. Auto-harness gates large tasks behind a two-stage flow.
 
 ### Stages
 
-- **Stage 1 (Claude Code, local) — done by an Engineer instance in Claude Code, NOT by you as the assignee.** Contested spec or architecture decisions are adjudicated by the CEO.
+- **Stage 1 (Codex, local) — done by an Engineer instance in Codex, NOT by you as the assignee.** Contested spec or architecture decisions are adjudicated by the Orchestrator.
   Runs `harness-engineering-skills:harness` to (1) assess whether the change fits the
   current scale and (2) draft logic + checkpoints. Output: `.harness/<task-id>/spec.md`
   inside the target repo's worktree. The spec is *not* committed; it lives on the local
@@ -78,10 +78,10 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
 [auto-harness: bounce]
 
 这个任务的复杂度超过我一次执行的预算（见上面的 budget 表，触发了 <signal>）。
-请先在本地用 Claude Code 跑一下 Stage 1：
+请先在本地用 Codex 跑一下 Stage 1：
 
     cd <repo-path>
-    # 在 Claude Code 里说："harness this task"，把这个 issue 的内容贴给它
+    # 在 Codex 里说："harness this task"，把这个 issue 的内容贴给它
     # 它会跑 brainstorm + spec evaluator，最后写到：
     #   <repo>/.harness/<task-id>/spec.md
 

@@ -17,11 +17,11 @@ assert_contains() {
 make_fixture() {
   local scenario="$1" tmp
   tmp="$(mktemp -d)"
-  mkdir -p "$tmp/repo/scripts" "$tmp/repo/agents/ceo" "$tmp/bin" "$tmp/state"
+  mkdir -p "$tmp/repo/scripts" "$tmp/repo/agents/orchestrator" "$tmp/bin" "$tmp/state"
   cp "$ROOT/scripts/sync-multica.sh" "$tmp/repo/scripts/"
   printf '%s\n' 'desired context' > "$tmp/repo/workspace-context.md"
-  printf '%s\n' 'desired personality' > "$tmp/repo/agents/ceo/personality.md"
-  printf '%s\n' 'desired skill' > "$tmp/repo/agents/ceo/skill.md"
+  printf '%s\n' 'desired personality' > "$tmp/repo/agents/orchestrator/personality.md"
+  printf '%s\n' 'desired skill' > "$tmp/repo/agents/orchestrator/skill.md"
   printf '%s' "$scenario" > "$tmp/state/scenario"
 
   cat > "$tmp/bin/multica" << 'STUB'
@@ -41,11 +41,11 @@ PY
 case "$1 $2" in
   "skill list")
     if [[ "$scenario" == "duplicate-skill" ]]; then
-      printf '[{"id":"skill-one","name":"CEO Skill"},{"id":"skill-two","name":"CEO Skill"}]\n'
+      printf '[{"id":"skill-one","name":"Orchestrator Skill"},{"id":"skill-two","name":"Orchestrator Skill"}]\n'
     elif [[ "$scenario" == "create" ]]; then
       printf '[]\n'
     else
-      printf '[{"id":"skill-ceo","name":"CEO Skill"}]\n'
+      printf '[{"id":"skill-orchestrator","name":"Orchestrator Skill"}]\n'
     fi
     ;;
   "skill get")
@@ -55,27 +55,27 @@ case "$1 $2" in
       exit 1
     fi
     if [[ "$scenario" == "matched" || "$scenario" == "retry" ]]; then
-      content="$(json_string_from_file "$SYNC_TEST_ROOT/agents/ceo/skill.md")"
+      content="$(json_string_from_file "$SYNC_TEST_ROOT/agents/orchestrator/skill.md")"
     else
       content='"remote skill"'
     fi
-    printf '{"id":"skill-ceo","name":"CEO Skill","content":%s}\n' "$content"
+    printf '{"id":"skill-orchestrator","name":"Orchestrator Skill","content":%s}\n' "$content"
     ;;
   "skill update")
     ;;
   "skill create")
-    printf '{"id":"skill-created","name":"CEO Skill"}\n'
+    printf '{"id":"skill-created","name":"Orchestrator Skill"}\n'
     ;;
   "agent list")
     if [[ "$scenario" == "matched" || "$scenario" == "retry" ]]; then
-      instructions="$(json_string_from_file "$SYNC_TEST_ROOT/agents/ceo/personality.md")"
+      instructions="$(json_string_from_file "$SYNC_TEST_ROOT/agents/orchestrator/personality.md")"
     else
       instructions='"remote personality"'
     fi
     if [[ "$scenario" == "duplicate-agent" ]]; then
-      printf '[{"id":"agent-one","name":"CEO","instructions":%s},{"id":"agent-two","name":"CEO","instructions":%s}]\n' "$instructions" "$instructions"
+      printf '[{"id":"agent-one","name":"Orchestrator","instructions":%s},{"id":"agent-two","name":"Orchestrator","instructions":%s}]\n' "$instructions" "$instructions"
     else
-      printf '[{"id":"agent-ceo","name":"CEO","instructions":%s}]\n' "$instructions"
+      printf '[{"id":"agent-orchestrator","name":"Orchestrator","instructions":%s}]\n' "$instructions"
     fi
     ;;
   "agent update")
@@ -83,7 +83,7 @@ case "$1 $2" in
   "agent skills")
     if [[ "$3" == "list" ]]; then
       if [[ "$scenario" == "matched" || "$scenario" == "retry" ]]; then
-        printf '[{"id":"skill-ceo","name":"CEO Skill","enabled":true}]\n'
+        printf '[{"id":"skill-orchestrator","name":"Orchestrator Skill","enabled":true}]\n'
       else
         printf '[]\n'
       fi
@@ -132,7 +132,7 @@ run_fixture() {
     SYNC_TEST_ROOT="$tmp/repo" \
     SYNC_TEST_STATE="$tmp/state" \
     MULTICA_WORKSPACE_ID="workspace-test" \
-    "$tmp/repo/scripts/sync-multica.sh" --agent ceo "$@"
+    "$tmp/repo/scripts/sync-multica.sh" --agent orchestrator "$@"
 }
 
 test_dry_run_plans_all_managed_resources() {
@@ -140,9 +140,9 @@ test_dry_run_plans_all_managed_resources() {
   tmp="$(make_fixture drift)"
   run_fixture "$tmp" > "$tmp/stdout" 2> "$tmp/stderr"
   assert_contains "$tmp/stderr" $'workspace\tcontext\tTest Workspace\twould update'
-  assert_contains "$tmp/stderr" $'ceo\tskill\tCEO Skill\twould update'
-  assert_contains "$tmp/stderr" $'ceo\tagent\tCEO\twould update'
-  assert_contains "$tmp/stderr" $'ceo\tattachment\tCEO\twould attach'
+  assert_contains "$tmp/stderr" $'orchestrator\tskill\tOrchestrator Skill\twould update'
+  assert_contains "$tmp/stderr" $'orchestrator\tagent\tOrchestrator\twould update'
+  assert_contains "$tmp/stderr" $'orchestrator\tattachment\tOrchestrator\twould attach'
   ! grep -Fq 'workspace update' "$tmp/state/calls.log" || fail "dry-run performed a workspace write"
   ! grep -Fq 'skill update' "$tmp/state/calls.log" || fail "dry-run performed a skill write"
   ! grep -Fq 'agent update' "$tmp/state/calls.log" || fail "dry-run performed an agent write"
@@ -153,9 +153,9 @@ test_apply_writes_context_content_instructions_and_attachment() {
   tmp="$(make_fixture drift)"
   run_fixture "$tmp" --apply > "$tmp/stdout" 2> "$tmp/stderr"
   assert_contains "$tmp/state/calls.log" 'workspace update workspace-test --context-stdin'
-  assert_contains "$tmp/state/calls.log" 'skill update skill-ceo --content-file agents/ceo/skill.md'
-  assert_contains "$tmp/state/calls.log" 'agent update agent-ceo --instructions desired personality'
-  assert_contains "$tmp/state/calls.log" 'agent skills add agent-ceo --skill-ids skill-ceo'
+  assert_contains "$tmp/state/calls.log" 'skill update skill-orchestrator --content-file agents/orchestrator/skill.md'
+  assert_contains "$tmp/state/calls.log" 'agent update agent-orchestrator --instructions desired personality'
+  assert_contains "$tmp/state/calls.log" 'agent skills add agent-orchestrator --skill-ids skill-orchestrator'
 }
 
 test_verify_passes_only_on_converged_state() {
@@ -163,7 +163,7 @@ test_verify_passes_only_on_converged_state() {
   tmp="$(make_fixture matched)"
   run_fixture "$tmp" --verify > "$tmp/stdout" 2> "$tmp/stderr"
   assert_contains "$tmp/stderr" $'workspace\tcontext\tTest Workspace\tup-to-date'
-  assert_contains "$tmp/stderr" $'ceo\tattachment\tCEO\tattached'
+  assert_contains "$tmp/stderr" $'orchestrator\tattachment\tOrchestrator\tattached'
 
   tmp="$(make_fixture drift)"
   if run_fixture "$tmp" --verify > "$tmp/stdout" 2> "$tmp/stderr"; then
@@ -179,7 +179,7 @@ test_workspace_guard_fails_closed() {
       SYNC_TEST_ROOT="$tmp/repo" \
       SYNC_TEST_STATE="$tmp/state" \
       MULTICA_WORKSPACE_ID="wrong-workspace" \
-      "$tmp/repo/scripts/sync-multica.sh" --agent ceo > "$tmp/stdout" 2> "$tmp/stderr"; then
+      "$tmp/repo/scripts/sync-multica.sh" --agent orchestrator > "$tmp/stdout" 2> "$tmp/stderr"; then
     fail "workspace mismatch unexpectedly passed"
   fi
   assert_contains "$tmp/stderr" 'refusing to sync the wrong workspace'
@@ -192,8 +192,8 @@ test_apply_preflight_blocks_partial_writes() {
       SYNC_TEST_ROOT="$tmp/repo" \
       SYNC_TEST_STATE="$tmp/state" \
       MULTICA_WORKSPACE_ID="workspace-test" \
-      SYNC_AGENT_CEO="Missing CEO" \
-      "$tmp/repo/scripts/sync-multica.sh" --agent ceo --apply > "$tmp/stdout" 2> "$tmp/stderr"; then
+      SYNC_AGENT_ORCHESTRATOR="Missing Orchestrator" \
+      "$tmp/repo/scripts/sync-multica.sh" --agent orchestrator --apply > "$tmp/stdout" 2> "$tmp/stderr"; then
     fail "apply unexpectedly passed with an unmapped agent"
   fi
   assert_contains "$tmp/stderr" 'No remote writes were attempted'
@@ -205,7 +205,7 @@ test_transient_reads_are_retried() {
   local tmp count
   tmp="$(make_fixture retry)"
   SYNC_READ_RETRY_DELAY=0 run_fixture "$tmp" --verify > "$tmp/stdout" 2> "$tmp/stderr"
-  count="$(grep -Fc 'skill get skill-ceo --output json' "$tmp/state/calls.log")"
+  count="$(grep -Fc 'skill get skill-orchestrator --output json' "$tmp/state/calls.log")"
   [[ "$count" == "2" ]] || fail "expected skill get to retry once, got $count calls"
   assert_contains "$tmp/stderr" 'read failed (attempt 1/3)'
 }
@@ -234,14 +234,14 @@ test_ambiguous_resources_fail_before_apply() {
   if run_fixture "$tmp" --apply > "$tmp/stdout" 2> "$tmp/stderr"; then
     fail "apply unexpectedly passed with duplicate agent names"
   fi
-  assert_contains "$tmp/stderr" "server agents matching 'CEO'"
+  assert_contains "$tmp/stderr" "server agents matching 'Orchestrator'"
   ! grep -Fq 'workspace update' "$tmp/state/calls.log" || fail "ambiguous agent allowed a write"
 
   tmp="$(make_fixture duplicate-skill)"
   if run_fixture "$tmp" --apply > "$tmp/stdout" 2> "$tmp/stderr"; then
     fail "apply unexpectedly passed with duplicate skill names"
   fi
-  assert_contains "$tmp/stderr" "server skills matching 'CEO Skill'"
+  assert_contains "$tmp/stderr" "server skills matching 'Orchestrator Skill'"
   ! grep -Fq 'workspace update' "$tmp/state/calls.log" || fail "ambiguous skill allowed a write"
 }
 
@@ -249,8 +249,8 @@ test_created_skill_is_attached_in_same_apply() {
   local tmp
   tmp="$(make_fixture create)"
   run_fixture "$tmp" --apply > "$tmp/stdout" 2> "$tmp/stderr"
-  assert_contains "$tmp/state/calls.log" 'skill create --name CEO Skill'
-  assert_contains "$tmp/state/calls.log" 'agent skills add agent-ceo --skill-ids skill-created'
+  assert_contains "$tmp/state/calls.log" 'skill create --name Orchestrator Skill'
+  assert_contains "$tmp/state/calls.log" 'agent skills add agent-orchestrator --skill-ids skill-created'
 }
 
 test_dry_run_plans_all_managed_resources

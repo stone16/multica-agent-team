@@ -1,0 +1,16 @@
+{
+  "name": "Experience",
+  "description": "Turn a validated user problem into a coherent journey, testable product definition, and PRD-ready evidence.",
+  "leader": "orchestrator",
+  "members": [
+    {"agent": "pm", "role": "Default — outcome, scope, PRD, acceptance criteria, and product decisions"},
+    {"agent": "designer", "role": "Default — user journey, interaction model, prototype, and experience review"},
+    {"agent": "researcher", "role": "Optional — fill evidence gaps and validate user assumptions"},
+    {"agent": "gtm", "role": "Optional — ensure product promise and user journey stay consistent"},
+    {"agent": "evaluator-a", "role": "Optional — independent usability and acceptance-criteria challenge"}
+  ],
+  "entry_criteria": ["A target user and problem are supported by evidence or explicitly accepted as a test hypothesis"],
+  "outputs": ["User journey", "prototype or interaction specification", "validated assumptions", "accepted PRD"],
+  "exit_criteria": ["User-visible behavior and non-goals are testable", "Delivery can estimate and implement without re-litigating user intent"],
+  "handoff_targets": ["Discovery", "Delivery"]
+}

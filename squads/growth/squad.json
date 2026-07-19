@@ -1,0 +1,17 @@
+{
+  "name": "Growth",
+  "description": "Launch products and improve acquisition, activation, retention, and commercial learning through measured experiments.",
+  "leader": "orchestrator",
+  "members": [
+    {"agent": "gtm", "role": "Default — positioning, launch sequence, channel strategy, experiment design, and market feedback"},
+    {"agent": "pm", "role": "Default — product metric, activation and retention decisions, and experiment scope"},
+    {"agent": "designer", "role": "Optional — acquisition, onboarding, activation, and retention experience"},
+    {"agent": "researcher", "role": "Optional — market evidence, audience research, and experiment interpretation"},
+    {"agent": "engineer-a", "role": "Optional — instrumentation and bounded product experiments"},
+    {"agent": "evaluator-a", "role": "Optional — verify instrumentation, experiment integrity, and user-visible claims"}
+  ],
+  "entry_criteria": ["A product or proposition is ready for a named market test, launch, or growth diagnosis"],
+  "outputs": ["Launch or experiment brief", "measured funnel", "decision with numerator and denominator", "feedback for product or positioning"],
+  "exit_criteria": ["The experiment reaches its decision threshold or kill criteria", "the next scale, revise, or stop decision is recorded"],
+  "handoff_targets": ["Discovery", "Experience", "Delivery", "Reliability"]
+}

@@ -1,0 +1,61 @@
+[
+  {
+    "logical_id": "orchestrator",
+    "profession": "orchestrator",
+    "runtime_provider": "claude",
+    "model": "claude-sonnet-5",
+    "legacy_skill_names": ["CEO Skill"]
+  },
+  {
+    "logical_id": "pm",
+    "profession": "pm",
+    "runtime_provider": "claude",
+    "model": "claude-opus-4-8"
+  },
+  {
+    "logical_id": "designer",
+    "profession": "designer",
+    "runtime_provider": "claude",
+    "model": "claude-opus-4-8"
+  },
+  {
+    "logical_id": "engineer-a",
+    "profession": "engineer",
+    "runtime_provider": "codex",
+    "model": "gpt-5.6-sol"
+  },
+  {
+    "logical_id": "engineer-b",
+    "profession": "engineer",
+    "runtime_provider": "codex",
+    "model": "gpt-5.6-sol"
+  },
+  {
+    "logical_id": "gtm",
+    "profession": "gtm",
+    "runtime_provider": "grok",
+    "model": ""
+  },
+  {
+    "logical_id": "evaluator-a",
+    "desired_name": "Evaluator-A",
+    "profession": "evaluator",
+    "runtime_provider": "grok",
+    "model": "",
+    "create_if_missing": true
+  },
+  {
+    "logical_id": "evaluator-b",
+    "desired_name": "Evaluator-B",
+    "profession": "evaluator",
+    "runtime_provider": "grok",
+    "model": "",
+    "create_if_missing": true
+  },
+  {
+    "logical_id": "researcher",
+    "profession": "researcher",
+    "runtime_provider": "claude",
+    "model": "claude-opus-4-8"
+  }
+]

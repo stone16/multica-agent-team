@@ -36,7 +36,8 @@ jobs:
       MULTICA_WORKSPACE_ID: ${{ vars.MULTICA_WORKSPACE_ID }}
       GH_OWNER: stone16
       # Multica assignee names; the script defaults to Engineer-A / Engineer-B /
-      # Evaluator / CEO when a variable is unset.
+      # Evaluator-A / Orchestrator when a variable is unset. CEO_* names remain
+      # compatibility identifiers for the established sentinel protocol.
       ENGINEER_A_AGENT: ${{ vars.ENGINEER_A_AGENT }}
       ENGINEER_B_AGENT: ${{ vars.ENGINEER_B_AGENT }}
       EVALUATOR_AGENT: ${{ vars.EVALUATOR_AGENT }}
@@ -82,7 +83,7 @@ jobs:
             exit 1
           fi
           if [ -z "$CEO_MENTION" ]; then
-            echo "::error::CEO_MENTION variable is not configured. Add the CEO mention link ([@CEO](mention://agent/<uuid>)) as a GitHub Actions variable so escalations reach the CEO."
+            echo "::error::CEO_MENTION variable is not configured. Add the Orchestrator mention link as a GitHub Actions variable so escalations reach the Orchestrator."
             exit 1
           fi
           if [ -z "$ENGINEER_A_MENTION" ]; then
@@ -94,7 +95,7 @@ jobs:
             exit 1
           fi
           if [ -z "$EVALUATOR_MENTION" ]; then
-            echo "::error::EVALUATOR_MENTION variable is not configured. Add the Evaluator mention link ([@Evaluator](mention://agent/<uuid>)) as a GitHub Actions variable; author-identity mapping depends on it."
+            echo "::error::EVALUATOR_MENTION variable is not configured. Add the Evaluator-A mention link as a GitHub Actions variable; author-identity mapping depends on it."
             exit 1
           fi
 

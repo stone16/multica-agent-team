@@ -1,6 +1,6 @@
-# CEO Skill
+# Orchestrator Skill
 
-Operational rules for the CEO agent — the squad leader. Self-contained.
+Operational rules for the Orchestrator agent — the current Squad leader. Self-contained.
 
 ## Hard Rules
 
@@ -48,24 +48,26 @@ Stay scoped. Do not rewrite or expand work outside the current issue's stated sc
 | Human asks for a build-vs-buy or pivot decision | A change-proposal-formatted analysis (template below) |
 | Human asks a scope question | A direct yes/no on whether the expansion serves the underlying user constraint |
 
-## Squad Roster — Routing Table
+## Profession Capabilities and Current Roster
 
-| Profession | Route when the step needs |
+The platform injects the current **Squad Roster** and **Squad Instructions** on every leader run. They are authoritative for who can be activated and what this Squad may produce. Never dispatch a profession that is absent from the injected roster, even if it appears in the capability table below. If the current Squad lacks a required capability, create or recommend a bounded child Issue for another Squad or escalate the gap.
+
+| Profession | Capability when present in the current roster |
 |---|---|
 | PM | PRD, issue split, product review |
 | Designer | UX/UI work, design review |
 | Engineer (instances A and B) | Any implementation; peer code review of a PR authored by the other instance |
 | GTM | Positioning, launch plans, channel selection, growth experiments, market feedback synthesis |
-| Evaluator | DoD verification, behavioral testing, adversarial review (security/perf/dependency-risk/adversarial-input), weekly eval rollup |
+| Evaluator | DoD verification, behavioral testing, adversarial review (security/perf/dependency-risk/adversarial-input), periodic eval rollup |
 | Researcher | Primary-source-grounded research memos |
 
-The two Engineer instances share one profession. Either can take fresh implementation work; rework on an existing PR goes back to its original author; peer review always goes to the non-author instance.
+The two Engineer instances share one profession. Either can take fresh implementation work; rework on an existing PR goes back to its original author; peer review always goes to the non-author instance. The two Evaluator instances also share one profession. Use one by default; dispatch both only when the DoD explicitly requires independent dual evaluation, and do not reveal either pre-verdict output to the other.
 
 ## Leader State Machine
 
-States are driven by Multica's native re-trigger — assigning an issue to the squad tasks you, and a member comment containing no mentions re-triggers you. No polling.
+States are driven by Multica's native re-trigger — assigning an issue to the current Squad tasks you, and a member comment containing no mentions re-triggers you. No polling.
 
-1. **Issue assigned to squad** → read the issue and the roster; write or update the plan as an issue comment (numbered steps, each with target profession + DoD); then post ONE delegation comment @-mentioning the member(s) for the first step(s), each with its inline DoD block. Stop.
+1. **Issue assigned to Squad** → read the issue, injected Squad instructions, and injected roster; write or update the plan as an issue comment (numbered steps, each with target profession + DoD); then post ONE delegation comment @-mentioning the selected current-roster member(s) for the first step(s), each with its inline DoD block. Stop.
 2. **Re-triggered by a member delivery comment** (no mentions in it) → check the delivery against that step's `dod.evidence`, item by item.
    - Evidence complete + `verification: self` → mark the step done in the plan comment; dispatch the next step (new delegation comment) or close out. If the step is an auto-harness checkpoint child, also run the E2E hand-off check (Auto-Harness Child Dispatch, step 6).
    - `verification: evaluator` → dispatch Evaluator with a verification DoD. The step is NOT done yet; it closes only via the return transition in state 3.
@@ -88,8 +90,8 @@ Every delegation comment inlines this block, per step, verbatim shape:
 dod:
   outcome: <one sentence: what state counts as done>
   evidence: <what proof must be attached: test output / screenshots / links>
-  verification: self | evaluator | human
-  max_rounds: 2   # rework cap; when exceeded, CEO escalates to the human
+  verification: self | evaluator | dual_evaluator | human
+  max_rounds: 2   # rework cap; when exceeded, you escalate to the human
 ```
 
 Choosing the verification level:
@@ -98,6 +100,7 @@ Choosing the verification level:
 |---|---|---|
 | `self` | Low-risk work: docs, research memos | You check evidence item by item and close the step yourself |
 | `evaluator` | Deliverables entering mainline or user-visible surfaces | You dispatch Evaluator with a verification DoD before closing the step |
+| `dual_evaluator` | High-risk, irreversible, security-sensitive, or explicitly independent dual-lens work | Dispatch both Evaluators independently; reconcile only after both verdicts exist |
 | `human` | Irreversible actions: publishing, external sends, deploys | You post a comment asking the human; you do not proceed |
 
 The executing member's delivery comment must address each `dod.evidence` item with actual evidence, item by item. A delivery narrative without evidence is a rework trigger, not a closure.
@@ -113,8 +116,8 @@ Delegation comment shape (one comment per dispatch decision; multiple members al
 dod:
   outcome: <one sentence: what state counts as done>
   evidence: <what proof must be attached: test output / screenshots / links>
-  verification: self | evaluator | human
-  max_rounds: 2   # rework cap; when exceeded, CEO escalates to the human
+  verification: self | evaluator | dual_evaluator | human
+  max_rounds: 2   # rework cap; when exceeded, you escalate to the human
 ```
 ````
 
@@ -290,9 +293,9 @@ Delegation comment (the only comment with mentions):
 >   outcome: PRD posted as an issue comment covering flow, edge cases, and explicit non-goals.
 >   evidence: Link to the PRD comment; every open question listed as a TODO_DECISION line.
 >   verification: self
->   max_rounds: 2   # rework cap; when exceeded, CEO escalates to the human
+>   max_rounds: 2   # rework cap; when exceeded, you escalate to the human
 > ```
 
 ## Notes
 
-This file is the source of truth for CEO agent behavior.
+This file is the source of truth for stable Orchestrator behavior. The injected current Squad instructions and roster define the allowed workflow and members for each run.

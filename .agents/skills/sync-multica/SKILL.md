@@ -1,90 +1,111 @@
 ---
 name: sync-multica
-description: Safely synchronize this repository's desired state to Multica and prove the remote state matches. Use when workspace-context.md, agents/*/personality.md, agents/*/skill.md, roster mappings, or the Multica workspace configuration changed; when bootstrapping or repairing the server-side agent team; or when asked to plan, apply, audit, or verify a Multica sync from this repo.
+description: Safely synchronize this repository's company constitution, Profession Profiles, Agent Instances, and persistent Squad topology to Multica, then prove the deployed state converges.
 ---
 
 # Sync Multica
 
-Treat the repository as desired state and the Multica server as deployed state. Always plan first, write only with explicit authorization, then prove convergence with a fresh read.
+Treat the repository as desired state and Multica as deployed state. Plan first, write only after explicit authorization, and prove convergence with a fresh read.
 
-## Safety contract
+## Safety Contract
 
 - Run from this repository's root.
-- Never commit workspace IDs, agent IDs, mention links, tokens, private repository names, or runtime IDs.
-- Keep operational mappings in the current shell environment with `SYNC_AGENT_<ROLE>` / `SYNC_SKILL_<ROLE>`.
-- Fail closed on an unmapped or ambiguous agent. Never guess which person, runtime, or computer owns a role.
-- Never create, rename, archive, or rebind an agent or squad as part of this skill. Those topology changes require a separately reviewed migration plan.
-- Never apply from a dirty tree, a non-`main` branch, or a `main` that is behind `origin/main`.
-- Redact tokens and environment values from evidence. Agent and workspace names are acceptable; UUIDs are operational identity and should be summarized, not pasted.
+- Require `AGENTS.md` and `CLAUDE.md` to be byte-identical.
+- Never commit workspace IDs, agent IDs, mention links, tokens, runtime IDs, or private environment values.
+- Resolve deployment identity from `deployments/agents.json` logical names and current remote reads. Never guess an ambiguous agent, runtime, skill, or Squad.
+- Never automatically archive an agent or Squad or remove an extra Squad member. Report the drift and require a separately reviewed destructive migration.
+- Apply only from a clean `main` whose `HEAD` equals `origin/main`.
+- Redact tokens and UUIDs from reported evidence. Agent, runtime-provider, workspace, and Squad names are acceptable.
+
+## Managed State
+
+| Source | Multica state |
+|---|---|
+| `workspace-context.md` | Workspace context |
+| `agents/<profession>/personality.md` | Agent instructions |
+| `agents/<profession>/skill.md` | Profession skill content and attachments |
+| `deployments/agents.json` | Logical instance name, profession, runtime provider, and model intent |
+| `squads/*/squad.json` | Squad name, description, leader, membership, and squad-local roles |
+| `squads/*/instructions.md` | Squad instructions |
+
+The two reconcilers are intentionally separated:
+
+- `scripts/sync-topology.py` resolves instances and persistent Squads. It may create only instances marked `create_if_missing` and missing tracked Squads; it does not delete or prune.
+- `scripts/sync-multica.sh` synchronizes company context and Profession Profile content for already-resolved instances.
 
 ## Workflow
 
-1. Confirm the checkout is safe:
+1. Validate the checkout and files:
 
    ```bash
-   git status --short --branch
    git fetch origin main
    test "$(git branch --show-current)" = main
    test -z "$(git status --porcelain)"
    test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+   cmp -s AGENTS.md CLAUDE.md
+   tests/sync-topology.test.py
+   tests/sync-multica.test.sh
+   bash tests/pr-sweep.test.sh
    ```
 
-   If any check fails, stop. Do not switch branches, discard changes, merge, or rebase without the user's authorization.
-
-2. Confirm the CLI and target:
+2. Confirm the selected target using fresh reads:
 
    ```bash
    multica --version
    multica auth status
    multica workspace get --output json
+   multica runtime list --output json
+   multica agent list --output json
+   multica squad list --output json
    ```
 
-   When `MULTICA_WORKSPACE_ID` is set, require it to match the workspace returned by the CLI. When it is unset, report the selected workspace name and ask for confirmation before the first apply in the conversation.
+   When `MULTICA_WORKSPACE_ID` is set, require it to match the selected workspace. Report the workspace name before the first apply in the conversation.
 
-3. Resolve agent mappings without guessing. The defaults expect server agents named `CEO`, `PM`, `Designer`, `Engineer-A`, `Engineer-B`, `GTM`, `Evaluator`, and `Researcher`. If the server uses different names, export mappings only for this shell:
+   If more than one online runtime exposes a required provider, set a shell-local exact mapping such as `SYNC_RUNTIME_CLAUDE`, `SYNC_RUNTIME_CODEX`, or `SYNC_RUNTIME_GROK` to one runtime name or ID. Likewise, map existing personal server display names with `SYNC_AGENT_<LOGICAL_ID>` variables such as `SYNC_AGENT_ENGINEER_A`; never persist either mapping.
 
-   ```bash
-   export SYNC_AGENT_CEO='<server-name-or-id>'
-   export SYNC_AGENT_PM='<server-name-or-id>'
-   export SYNC_AGENT_DESIGNER='<server-name-or-id>'
-   export SYNC_AGENT_ENGINEER='<engineer-a-name-or-id>,<engineer-b-name-or-id>'
-   export SYNC_AGENT_GTM='<server-name-or-id>'
-   export SYNC_AGENT_EVALUATOR='<server-name-or-id>'
-   export SYNC_AGENT_RESEARCHER='<server-name-or-id>'
-   ```
-
-   Do not persist these values in tracked files.
-
-4. Run the read-only plan:
+3. Run both read-only plans:
 
    ```bash
+   scripts/sync-topology.py
    scripts/sync-multica.sh
    ```
 
-   Review every row. The plan covers workspace context, skill content, agent instructions, and skill-to-agent assignments. Any `unmapped`, `failed`, or unexpected create is a blocker.
+   Review every row. Missing non-creatable instances, ambiguous resources, multiple online runtimes for the same provider, extra Squad members, or unexpected new resources are blockers.
 
-5. Apply only after the user has authorized the displayed plan:
+4. Apply topology first, then content:
 
    ```bash
+   scripts/sync-topology.py --apply
    scripts/sync-multica.sh --apply
    ```
 
-6. Verify using a new server read, never the apply process's cached state:
+5. Perform a fresh verification after both apply processes finish:
 
    ```bash
+   scripts/sync-topology.py --verify
    scripts/sync-multica.sh --verify
    ```
 
-   Success requires exit status 0 and every managed row to be `up-to-date` or `attached`. A verify run with any missing resource, content drift, instruction drift, attachment drift, read failure, or unmapped target must exit nonzero.
+   Success requires both exit statuses to be zero and no remaining drift.
+
+6. For the first shared-instance rollout, run a non-production canary Issue before assigning real work:
+
+   - The same agent can belong to Discovery and Experience.
+   - Removing it from the canary does not mutate another Squad.
+   - The leader sees the correct Squad instructions and only the originating roster.
+   - A member's mention-free delivery returns to the correct leader run.
+   - Squad activity is attributed to the originating Squad.
+   - No unrelated Project or Domain context leaks into the run.
+   - Evaluator-A and Evaluator-B never verify their own work and receive independent pre-verdict contexts.
 
 7. Report concise evidence:
 
    - local `HEAD` and `origin/main` equality;
    - Multica CLI version and workspace name;
-   - counts of updated/created/attached resources from apply;
-   - the final verify exit status and summary;
-   - any topology work intentionally left out.
+   - created/updated instances, skills, and Squads by logical name, without UUIDs;
+   - final topology and content verify exit statuses;
+   - canary result and anything skipped.
 
-## Scope boundary
+## Scope Boundary
 
-This skill synchronizes content and attachments for agents that already exist. Agent creation, runtime/model changes, renames, archives, squad creation/membership, project resources, and autopilots are separate topology migrations because a wrong choice can route work to the wrong computer or identity.
+This skill manages only the tracked, non-secret desired state above. Agent archives, Squad archives, membership removals, runtime installation, secrets, project resources, autopilots, publishing, deployments, and external sends require separate explicit authorization.

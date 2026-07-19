@@ -1,0 +1,15 @@
+{
+  "name": "Discovery",
+  "description": "Find an evidence-backed target user, problem, opportunity, and positioning hypothesis before product commitment.",
+  "leader": "orchestrator",
+  "members": [
+    {"agent": "researcher", "role": "Default — primary-source evidence, market and user research, uncertainty map"},
+    {"agent": "gtm", "role": "Default — alternatives, segment selection, positioning, and market test design"},
+    {"agent": "pm", "role": "Default — user problem framing, product implications, and opportunity decision"},
+    {"agent": "designer", "role": "Optional — exploratory journey or concept when behavior must be made concrete"}
+  ],
+  "entry_criteria": ["An opportunity, audience, or problem is important but materially uncertain"],
+  "outputs": ["Evidence memo", "target segment and problem", "positioning hypothesis", "assumptions and kill criteria"],
+  "exit_criteria": ["A named decision can be made from cited evidence", "residual uncertainty and next experiment are explicit"],
+  "handoff_targets": ["Experience", "Growth"]
+}

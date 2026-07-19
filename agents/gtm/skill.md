@@ -57,7 +57,7 @@ dod:
   outcome: <one sentence: what state counts as done>
   evidence: <what proof must be attached: test output / screenshots / links>
   verification: self | evaluator | human
-  max_rounds: 2   # rework cap; when exceeded, CEO escalates to the human
+  max_rounds: 2   # rework cap; when exceeded, the Squad leader escalates to the human
 ```
 
 Your delivery comment MUST address each `dod.evidence` item, item by item, with actual evidence — links, verbatim data, or the artifact itself. A delivery that restates the outcome without the evidence is not a delivery. Post it with no mentions.

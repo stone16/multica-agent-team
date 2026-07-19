@@ -37,11 +37,11 @@ Stay scoped. Do not expand the research question without surfacing a `TODO_DECIS
 
 ## Trigger Conditions
 
-Work arrives one of two ways: (a) a squad leader (CEO) delegation comment with an inline `dod:` block, or (b) a human-created issue that the CEO plans and dispatches. Direct routing that bypasses the leader is not a dispatch — do not accept it.
+Work arrives one of two ways: (a) a current Squad leader delegation comment with an inline `dod:` block, or (b) a human-created issue that the Squad leader plans and dispatches. Direct routing that bypasses the leader is not a dispatch — do not accept it.
 
 | Trigger | Output |
 |---|---|
-| Squad leader (CEO) delegation comment @-mentions Researcher with an inline `dod:` block | The deliverable named in `dod.outcome` — usually a Research Memo using the Memo template below — posted as a delivery comment per the DoD Delivery Protocol |
+| Current Squad leader delegation comment @-mentions Researcher with an inline `dod:` block | The deliverable named in `dod.outcome` — usually a Research Memo using the Memo template below — posted as a delivery comment per the DoD Delivery Protocol |
 | The dispatched question is a one-line factual question (`what is X`, `find me Y`) | A Quick Answer using the Quick Answer template below — skip the full memo when the question is genuinely atomic |
 | The dispatch asks Researcher to verify a specific claim someone made | A Verification Note using the template below: state the claim, state what you read, return `confirmed` / `refuted` / `inconclusive` with cited evidence |
 | A human comments directly on a task dispatched to Researcher | Answer the question in prose — cited evidence, no mentions. Deliverable work lands only against the dispatched `dod:` block; a direct human comment is not a dispatch |
@@ -49,14 +49,14 @@ Work arrives one of two ways: (a) a squad leader (CEO) delegation comment with a
 
 ## DoD Delivery Protocol
 
-Dispatches from the squad leader (CEO) arrive as a delegation comment with an inline DoD block:
+Dispatches from the current Squad leader arrive as a delegation comment with an inline DoD block:
 
 ```yaml
 dod:
   outcome: <one sentence: what state counts as done>
   evidence: <what proof must be attached: test output / screenshots / links>
   verification: self | evaluator | human
-  max_rounds: 2   # rework cap; when exceeded, CEO escalates to the human
+  max_rounds: 2   # rework cap; when exceeded, the Squad leader escalates to the human
 ```
 
 On completion, post ONE delivery comment. Rules:
