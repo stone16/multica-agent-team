@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img" aria-labelledby="title desc">
+  <title id="title">Multica Agent Team stable contract and changeable deployment flow</title>
+  <desc id="desc">Stable repository contracts flow through a deployment bridge into Multica, where an Issue run is orchestrated, delegated, verified, and closed. Deployment identity and run state are changeable; professions, Squad missions, protocol, tests, and evidence contracts are stable.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L10,3 L0,6 Z" fill="#475569"/></marker>
+    <style>
+      .title { font: 700 28px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; fill: #0f172a; }
+      .label { font: 600 17px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; fill: #0f172a; }
+      .small { font: 15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; fill: #334155; }
+      .stable { fill: #dbeafe; stroke: #2563eb; stroke-width: 2; }
+      .runtime { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .run { fill: #fef3c7; stroke: #d97706; stroke-width: 2; }
+      .line { stroke: #475569; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .dashed { stroke: #64748b; stroke-width: 2; stroke-dasharray: 8 7; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1200" height="650" fill="#ffffff"/>
+  <text x="600" y="48" text-anchor="middle" class="title">Multica Agent Team: stable contract → changeable deployment → verified run</text>
+  <rect x="30" y="82" width="350" height="130" rx="16" class="stable"/>
+  <text x="205" y="116" text-anchor="middle" class="label">Stable in Git</text>
+  <text x="205" y="146" text-anchor="middle" class="small">Professions · Squad missions</text>
+  <text x="205" y="171" text-anchor="middle" class="small">Rules · DoD · tests · evidence contracts</text>
+  <rect x="425" y="82" width="350" height="130" rx="16" class="runtime"/>
+  <text x="600" y="116" text-anchor="middle" class="label">Changeable at deployment</text>
+  <text x="600" y="146" text-anchor="middle" class="small">Provider · model · identity · capacity</text>
+  <text x="600" y="171" text-anchor="middle" class="small">Multica workspace topology</text>
+  <rect x="820" y="82" width="350" height="130" rx="16" class="run"/>
+  <text x="995" y="116" text-anchor="middle" class="label">Changeable per Run</text>
+  <text x="995" y="146" text-anchor="middle" class="small">Issue · project facts · temporary context</text>
+  <text x="995" y="171" text-anchor="middle" class="small">Activated roles and current evidence</text>
+  <path d="M380 147 H425" class="line"/><path d="M775 147 H820" class="line"/>
+  <path d="M995 212 V270" class="line"/>
+  <rect x="110" y="280" width="980" height="275" rx="18" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="600" y="314" text-anchor="middle" class="label">Issue-scoped operating loop</text>
+  <rect x="150" y="355" width="170" height="92" rx="12" class="run"/><text x="235" y="389" text-anchor="middle" class="label">Orchestrator</text><text x="235" y="416" text-anchor="middle" class="small">selects minimum team</text>
+  <rect x="370" y="355" width="170" height="92" rx="12" class="stable"/><text x="455" y="389" text-anchor="middle" class="label">Delegation</text><text x="455" y="416" text-anchor="middle" class="small">bounded DoD</text>
+  <rect x="590" y="355" width="170" height="92" rx="12" class="runtime"/><text x="675" y="389" text-anchor="middle" class="label">Member delivery</text><text x="675" y="416" text-anchor="middle" class="small">evidence, no mentions</text>
+  <rect x="810" y="355" width="220" height="92" rx="12" class="stable"/><text x="920" y="389" text-anchor="middle" class="label">Verification</text><text x="920" y="416" text-anchor="middle" class="small">Evaluator or human gate</text>
+  <path d="M320 401 H370" class="line"/><path d="M540 401 H590" class="line"/><path d="M760 401 H810" class="line"/>
+  <rect x="405" y="485" width="390" height="45" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/><text x="600" y="514" text-anchor="middle" class="label">Close · hand off · record residual risk</text>
+  <path d="M920 447 V485 H795" class="line"/>
+  <path d="M405 530 C300 610 190 610 190 450" class="dashed"/><text x="225" y="602" class="small">rework is capped and evidenced</text>
+  <path d="M600 555 V610 H995 V212" class="dashed"/><text x="730" y="638" class="small">only reviewed durable facts return to the Project ledger</text>
+</svg>
