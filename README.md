@@ -13,6 +13,7 @@ This repo is being prepared for open-sourcing. Tracked files use neutral roster 
 | `agents/<role>/skill.md` | Agent operational rules — imperative, written in harness-template style. Self-contained per agent (no cross-references) | One Multica skill, mounted on the agent(s) for that profession |
 | `templates/*.md` | Output templates. Team-specific content (roster, routing preamble) is canonical here; only the generic section skeleton mirrors `stone16/harness-template`. Not synced to Multica — agents inline them in their own `skill.md` | — |
 | `scripts/sync-multica.sh` | Bridge from this repo to the Multica server (Multica has no git-sync). See "Syncing to Multica" | `multica skill update` / `multica agent update` |
+| `.agents/skills/sync-multica/` | Repo-local operating procedure for planning, applying, and proving a Multica sync without committing operational identity | Codex repo skill |
 | `.github/workflows/pr-sweep.yml` + `.github/scripts/pr-sweep.sh` + `tests/pr-sweep.test.sh` | Automated PR review chain. See "PR-Sweep Automation" | One Multica review issue per PR |
 
 Each profession is two files. No shared skills, no cross-file references — every rule an agent needs is duplicated into that agent's `skill.md`. Duplication is the price of self-containment; we accept it.
@@ -234,17 +235,20 @@ The cron is `*/15 * * * *`. To disable temporarily, comment out the `schedule` b
 
 Multica has no git-sync: agent instructions and skills live server-side, and this repo is the desired state. `scripts/sync-multica.sh` is the bridge — for every profession directory under `agents/`:
 
+- `workspace-context.md` → the selected workspace's `context`
 - `agents/<role>/skill.md` → `multica skill update` (create when the skill is absent)
 - `agents/<role>/personality.md` → `multica agent update --instructions` (the `engineer` role fans out to both instances, Engineer-A and Engineer-B)
+- the resolved profession skill → every mapped agent for that profession (`multica agent skills add` when missing)
 
 ```bash
 scripts/sync-multica.sh                    # dry run, all roles — prints commands + summary, writes nothing
 scripts/sync-multica.sh --agent ceo        # dry run, one role
 scripts/sync-multica.sh --apply            # execute, all roles
 scripts/sync-multica.sh --apply --agent engineer
+scripts/sync-multica.sh --verify           # fresh read; nonzero if any managed state still drifts
 ```
 
-Dry-run is the default; only `--apply` writes. Auth is ambient (`multica login` / `MULTICA_SERVER_URL` / `MULTICA_WORKSPACE_ID`) — the script never reads, stores, or embeds tokens, and it fails loud when the `multica` CLI is missing. Naming follows convention ("CEO Skill", agent display names) with `SYNC_SKILL_<ROLE>` / `SYNC_AGENT_<ROLE>` env overrides when server naming differs. Agent creation and model/runtime changes are deliberately out of scope: an unmapped agent fails the run with instructions, and desired models per role are documented in the Roster table above — append `--model` / `--runtime-id` to the printed `multica agent update` command manually.
+Dry-run is the default; only `--apply` writes. `--apply` resolves every agent mapping before its first write, and `--verify` performs a new read and fails on any remaining context, content, instruction, or attachment drift. Auth is ambient (`multica login` / `MULTICA_SERVER_URL` / `MULTICA_WORKSPACE_ID`) — the script never reads, stores, or embeds tokens, and it fails loud when the `multica` CLI is missing. Naming follows convention ("CEO Skill", agent display names) with `SYNC_SKILL_<ROLE>` / `SYNC_AGENT_<ROLE>` env overrides when server naming differs. Agent creation and model/runtime changes are deliberately out of scope: an unmapped agent fails the run with instructions, and desired models per role are documented in the Roster table above — append `--model` / `--runtime-id` to the printed `multica agent update` command manually. Use the repo-local `$sync-multica` skill for the complete main-branch preflight, dry-run → apply → verify sequence and evidence requirements.
 
 ## Do Not
 

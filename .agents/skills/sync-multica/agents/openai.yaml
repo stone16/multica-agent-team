@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sync Multica"
+  short_description: "Sync and verify this repo against Multica"
+  default_prompt: "Use $sync-multica to safely plan, apply, and verify this repository against Multica."
