@@ -42,7 +42,7 @@ def make_fixture(state: str) -> Path:
                     "logical_id": "orchestrator",
                     "profession": "orchestrator",
                     "runtime_provider": "claude",
-                    "model": "claude-opus-4-8",
+                    "model": "claude-opus-5",
                 },
                 {
                     "logical_id": "evaluator-a",
@@ -82,7 +82,7 @@ def save():
     state_path.write_text(json.dumps(state))
 
 if args[:2] == ["agent", "list"]:
-    agents = state["agents"] or [{"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-4-8"}]
+    agents = state["agents"] or [{"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-5"}]
     print(json.dumps(agents))
 elif args[:2] == ["runtime", "list"]:
     print(json.dumps([
@@ -102,7 +102,7 @@ elif args[:2] == ["agent", "create"]:
     name = args[args.index("--name") + 1]
     runtime = args[args.index("--runtime-id") + 1]
     created = {"id":"a-eval","name":name,"runtime_id":runtime,"model":""}
-    state["agents"] = [{"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-4-8"}, created]
+    state["agents"] = [{"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-5"}, created]
     save(); print(json.dumps(created))
 elif args[:2] == ["agent", "update"]:
     updated = None
@@ -187,7 +187,7 @@ def test_apply_creates_missing_instance_and_squad() -> None:
     assert any(call[:3] == ["squad", "member", "add"] for call in state["calls"])
 
 
-def test_apply_keeps_identity_across_rename_and_runtime_change() -> None:
+def test_apply_upgrades_legacy_claude_model() -> None:
     tmp = make_fixture("matched")
     write(
         tmp / "state.json",
@@ -196,6 +196,35 @@ def test_apply_keeps_identity_across_rename_and_runtime_change() -> None:
                 "scenario": "matched",
                 "agents": [
                     {"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-4-8"},
+                    {"id":"a-eval","name":"Legacy Evaluator","runtime_id":"r-grok","model":""},
+                ],
+                "squads": [{"id":"s-discovery","name":"Discovery","description":"Discover","leader_id":"a-lead","instructions":"Discovery instructions\n"}],
+                "calls": [],
+            }
+        ),
+    )
+    result = run_fixture(tmp, "--apply", "--allow-dirty-apply")
+    assert result.returncode == 0, result.stderr
+    state = json.loads((tmp / "state.json").read_text())
+    orchestrator = next(agent for agent in state["agents"] if agent["id"] == "a-lead")
+    assert orchestrator["model"] == "claude-opus-5"
+    assert any(
+        call[:3] == ["agent", "update", "a-lead"]
+        and call[call.index("--model") + 1] == "claude-opus-5"
+        for call in state["calls"]
+        if "--model" in call
+    )
+
+
+def test_apply_keeps_identity_across_rename_and_runtime_change() -> None:
+    tmp = make_fixture("matched")
+    write(
+        tmp / "state.json",
+        json.dumps(
+            {
+                "scenario": "matched",
+                "agents": [
+                    {"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-5"},
                     {"id":"a-eval","name":"Legacy Evaluator","runtime_id":"r-claude","model":"claude-opus-4-8"},
                 ],
                 "squads": [],
@@ -225,7 +254,7 @@ def test_verify_rejects_drift_and_accepts_convergence() -> None:
             {
                 "scenario": "matched",
                 "agents": [
-                    {"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-4-8"},
+                    {"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-5"},
                     {"id":"a-eval","name":"Evaluator-A","runtime_id":"r-grok","model":""},
                 ],
                 "squads": [{"id":"s-discovery","name":"Discovery","description":"Discover","leader_id":"a-lead","instructions":"Discovery instructions\n"}],
@@ -246,7 +275,7 @@ def test_extra_members_fail_closed() -> None:
             {
                 "scenario": "extra-member",
                 "agents": [
-                    {"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-4-8"},
+                    {"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-5"},
                     {"id":"a-eval","name":"Evaluator-A","runtime_id":"r-grok","model":""},
                 ],
                 "squads": [{"id":"s-discovery","name":"Discovery","description":"Discover","leader_id":"a-lead","instructions":"Discovery instructions\n"}],
@@ -262,6 +291,7 @@ def test_extra_members_fail_closed() -> None:
 def main() -> None:
     test_plan_is_read_only()
     test_apply_creates_missing_instance_and_squad()
+    test_apply_upgrades_legacy_claude_model()
     test_apply_keeps_identity_across_rename_and_runtime_change()
     test_verify_rejects_drift_and_accepts_convergence()
     test_extra_members_fail_closed()
