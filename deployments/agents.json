@@ -3,20 +3,20 @@
     "logical_id": "orchestrator",
     "profession": "orchestrator",
     "runtime_provider": "claude",
-    "model": "claude-opus-4-8",
+    "model": "claude-opus-5",
     "legacy_skill_names": ["CEO Skill"]
   },
   {
     "logical_id": "pm",
     "profession": "pm",
     "runtime_provider": "claude",
-    "model": "claude-opus-4-8"
+    "model": "claude-opus-5"
   },
   {
     "logical_id": "designer",
     "profession": "designer",
     "runtime_provider": "claude",
-    "model": "claude-opus-4-8"
+    "model": "claude-opus-5"
   },
   {
     "logical_id": "engineer-a",
@@ -56,6 +56,6 @@
     "logical_id": "researcher",
     "profession": "researcher",
     "runtime_provider": "claude",
-    "model": "claude-opus-4-8"
+    "model": "claude-opus-5"
   }
 ]
