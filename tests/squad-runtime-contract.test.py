@@ -74,6 +74,16 @@ def test_pr_sweep_caller_compatibility() -> None:
     assert 'multica issue update "$issue_id" --status in_progress --assignee "$CEO_AGENT"' in sweep
 
 
+def test_pm_split_uses_exact_squad_contract() -> None:
+    pm = read("agents/pm/skill.md")
+    assert "templates/squad-issue.md" in pm
+    assert "--assignee-id <owning-squad-uuid>" in pm
+    assert "## Owning Squad" in pm
+    assert "## Correlation ID" in pm
+    assert "## Result Contract" in pm
+    assert "Leave `assignee` empty" not in pm
+
+
 def test_fallback_eligibility_contract() -> None:
     company = read("AGENTS.md")
     workspace = read("workspace-context.md")
@@ -110,7 +120,12 @@ def test_lost_response_result_idempotency() -> None:
     assert "delivered | inconclusive | blocked | escalated" in orchestrator
     assert "--parent <trigger-comment-id>" in orchestrator
     assert "<!-- squad-result: sha256:<correlation-hash> -->" in orchestrator
-    assert "multica issue comment list" in orchestrator
+    assert (
+        "multica issue comment list <parent-issue-id> --full --output json"
+        in orchestrator
+    )
+    assert "--thread <trigger-comment-id>" not in orchestrator
+    assert "different top-level trigger" in orchestrator
     assert "reuse that comment UUID" in orchestrator
     assert "Before the initial write and before every retry" in orchestrator
     assert "More than one exact marker match" in orchestrator
@@ -182,6 +197,9 @@ def test_checkpoint_plan_graph_contract() -> None:
     assert "before creating any child" in orchestrator
     assert "--stage <validated stage> --status <validated status>" in orchestrator
     assert "Depends on: <comma-separated IDs | none>" in orchestrator
+    assert "templates/squad-issue.md" in orchestrator
+    assert "--assignee-id <exact owning Squad UUID>" in orchestrator
+    assert "--assignee-id <Engineer instance UUID>" not in orchestrator
 
     malformed_cases = (
         ("zero entries", [], "at least one checkpoint"),
@@ -228,6 +246,28 @@ def test_checkpoint_plan_graph_contract() -> None:
     print("PASS: rejected malformed checkpoint graphs: " + ", ".join(case[0] for case in malformed_cases))
 
 
+def test_auto_harness_uses_squad_ownership() -> None:
+    orchestrator = read("agents/orchestrator/skill.md")
+    harness = read("templates/auto-harness.md")
+    for surface in (orchestrator, harness):
+        assert "templates/squad-issue.md" in surface
+        assert "--assignee-id <exact owning Squad UUID>" in surface
+        assert "--assignee-id <Engineer instance UUID" not in surface
+    assert "assigned to the parent's exact owning Squad" in orchestrator
+    assert "assigned directly to an Engineer" not in harness
+
+
+def test_dual_evaluator_requires_two_distinct_verdicts() -> None:
+    orchestrator = read("agents/orchestrator/skill.md")
+    assert "verification: dual_evaluator" in orchestrator
+    assert "two distinct Evaluator author UUIDs" in orchestrator
+    assert "one verdict exists" in orchestrator
+    assert "both independent verdicts exist" in orchestrator
+    assert "both verdicts are `PASS`" in orchestrator
+    assert "either verdict is `FAIL`" in orchestrator
+    assert "do not mark the step done" in orchestrator
+
+
 def test_monitoring_and_recovery_contract() -> None:
     orchestrator = read("agents/orchestrator/skill.md")
     for command in (
@@ -267,12 +307,15 @@ def main() -> None:
     tests = (
         test_mirrored_company_contract,
         test_pr_sweep_caller_compatibility,
+        test_pm_split_uses_exact_squad_contract,
         test_fallback_eligibility_contract,
         test_lost_response_result_idempotency,
         test_final_result_schema_and_order,
         test_specialized_close_order,
         test_native_stage_contract,
         test_checkpoint_plan_graph_contract,
+        test_auto_harness_uses_squad_ownership,
+        test_dual_evaluator_requires_two_distinct_verdicts,
         test_monitoring_and_recovery_contract,
         test_recursive_descendant_cancellation,
     )

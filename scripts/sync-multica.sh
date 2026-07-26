@@ -320,12 +320,16 @@ PY
 sync_skill_files() {
   local role="$1" skill_id="$2" files_root="agents/$1/files"
   local remote_json remote_err relative_path local_file remote_file status remote_exists
+  local errors_before="$ERRORS"
   local -a local_paths=()
   [[ -d "$files_root" ]] || return 0
+  if [[ "$APPLY" -eq 1 && -f "$WORK_DIR/skill-files-applied-$role" ]]; then
+    return 0
+  fi
 
   remote_json="$WORK_DIR/skill-files-$role.json"
   remote_err="$WORK_DIR/skill-files-$role.err"
-  if ! read_json_with_retry "$remote_json" "$remote_err" \
+  if [[ ! -f "$remote_json" ]] && ! read_json_with_retry "$remote_json" "$remote_err" \
       multica skill files list "$skill_id" --output json; then
     log "[$role] failed to list supporting files for skill $skill_id:"
     cat "$remote_err" >&2
@@ -392,6 +396,9 @@ PY
     fi
     add_row "$role" "skill-file" "$relative_path" "$status"
   done
+  if [[ "$APPLY" -eq 1 && "$ERRORS" -eq "$errors_before" ]]; then
+    : > "$WORK_DIR/skill-files-applied-$role"
+  fi
 }
 
 record_deferred_skill_files() {
@@ -680,7 +687,7 @@ sync_agents() {
 # unmapped. Also reject one server agent mapped to two professions: that would
 # mount conflicting instructions under a seemingly successful plan.
 preflight_apply_resources() {
-  local role targets target match agent_id prior skill_name errors=0
+  local role targets target match agent_id prior skill_name skill_id errors=0
   local seen="$WORK_DIR/preflight-agent-ids"
   : > "$seen"
   for role in "${ROLES[@]}"; do
@@ -690,6 +697,15 @@ preflight_apply_resources() {
       if [[ "$match" == AMBIGUOUS$'\t'* ]]; then
         log "[preflight] $role has ${match#*$'\t'} server skills matching '$skill_name'."
         errors=$((errors + 1))
+      elif [[ -z "$match" && -d "agents/$role/files" ]]; then
+        log "[preflight] $role skill '$skill_name' is missing but has required supporting files; cannot safely create and activate it before those files exist."
+        errors=$((errors + 1))
+      elif [[ -n "$match" && -d "agents/$role/files" ]]; then
+        skill_id="${match%%$'\t'*}"
+        printf '%s' "$skill_id" > "$WORK_DIR/skill-id-$role"
+        if ! preflight_skill_files "$role" "$skill_id"; then
+          errors=$((errors + 1))
+        fi
       fi
     fi
     targets="$(agent_targets_for "$role")"
@@ -722,6 +738,56 @@ preflight_apply_resources() {
     || die "$errors resource mapping error(s) found before apply. No remote writes were attempted."
 }
 
+# Validate every existing skill's complete supporting-file inventory before the
+# first apply write. The cached list is reused by the leading upsert phase, so
+# an unmanaged file or failed inventory read cannot be discovered after any
+# workspace, skill-body, agent, or attachment activation.
+preflight_skill_files() {
+  local role="$1" skill_id="$2" files_root="agents/$1/files"
+  local remote_json="$WORK_DIR/skill-files-$role.json"
+  local remote_err="$WORK_DIR/skill-files-$role.err"
+  local local_file
+  local -a local_paths=()
+
+  if ! read_json_with_retry "$remote_json" "$remote_err" \
+      multica skill files list "$skill_id" --output json; then
+    log "[preflight] $role failed to list supporting files for skill $skill_id:"
+    cat "$remote_err" >&2
+    return 1
+  fi
+  while IFS= read -r local_file; do
+    local_paths+=("${local_file#${files_root}/}")
+  done < <(find "$files_root" -type f ! -path '*/__pycache__/*' ! -name '*.pyc' -print | LC_ALL=C sort)
+
+  if ! python3 - "$remote_json" "${local_paths[@]}" > "$WORK_DIR/unmanaged-skill-files-$role" << 'PY'
+import json, sys
+managed = set(sys.argv[2:])
+unmanaged = [item.get("path") or "<empty>" for item in json.load(open(sys.argv[1])) if item.get("path") not in managed]
+if unmanaged:
+    print("\n".join(unmanaged))
+    raise SystemExit(1)
+PY
+  then
+    log "[preflight] $role server skill has supporting files absent from agents/$role/files:"
+    cat "$WORK_DIR/unmanaged-skill-files-$role" >&2
+    return 1
+  fi
+}
+
+apply_supporting_files_before_activation() {
+  local role skill_id errors_before
+  for role in "${ROLES[@]}"; do
+    [[ -d "agents/$role/files" ]] || continue
+    [[ -f "$WORK_DIR/skill-id-$role" ]] || continue
+    skill_id="$(cat "$WORK_DIR/skill-id-$role")"
+    errors_before="$ERRORS"
+    sync_skill_files "$role" "$skill_id"
+    if [[ "$ERRORS" -ne "$errors_before" ]]; then
+      die "supporting-file phase failed before contract activation; no workspace, skill-body, agent, or attachment writes were attempted."
+    fi
+  done
+}
+
 # ---------- Main ----------
 
 ROLES=()
@@ -739,6 +805,7 @@ fi
 
 if [[ "$APPLY" -eq 1 ]]; then
   preflight_apply_resources
+  apply_supporting_files_before_activation
 fi
 
 if [[ "$APPLY" -eq 1 ]]; then

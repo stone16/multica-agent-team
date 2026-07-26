@@ -142,10 +142,10 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
    ]
    ```
 
-   Suggested assignees are advisory: every implementation checkpoint goes to
-   an Engineer instance (Engineer-A or Engineer-B — instance-neutral; either
-   takes fresh work). Vertical tiers are abolished; do not route by perceived
-   difficulty.
+   Suggested implementation roles are advisory: the child is owned by the
+   parent's exact Squad, whose leader chooses an Engineer instance and the
+   required Evaluator lane(s). Vertical tiers are abolished; do not route by
+   perceived difficulty.
 
 3. The **CEO** validates the authoritative JSON graph before creating any child,
    then creates and dispatches every child issue with the validator's exact
@@ -163,11 +163,13 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
      --parent <parent-issue-id> \
      --stage <validated stage> \
      --status <validated status> \
-     --assignee-id <Engineer instance UUID>
+     --assignee-id <exact owning Squad UUID>
    multica issue label add <child-id> <harness:cp label-id>
    ```
 
-   Every dispatch carries an inline `dod:` block
+   Every child body uses `templates/squad-issue.md`, including its owning Squad,
+   stable correlation ID, result contract, verification, evidence, work graph,
+   freshness, rework, and fallback sections. Every leader dispatch carries an inline `dod:` block
    (`outcome` / `evidence` / `verification` / `max_rounds`) per the DoD
    Dispatch Protocol — the CEO may adjust the suggested fields, but no child
    issue is dispatched without one. The CEO then posts the dispatch comment
@@ -178,8 +180,8 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
 
    Spec: <repo>/.harness/<task-id>/spec.md
    Dispatched checkpoints:
-   - cp-01 → [STO-NNN](mention://issue/<id>) → Engineer
-   - cp-02 → [STO-NNN](mention://issue/<id>) → Engineer
+   - cp-01 → [STO-NNN](mention://issue/<id>) → owning Squad
+   - cp-02 → [STO-NNN](mention://issue/<id>) → owning Squad
    - ...
 
    Native stage barriers will wake the parent after each runnable frontier closes.
@@ -228,12 +230,13 @@ multica issue create \
   --parent <parent-issue-id> \
   --stage <checkpoint stage + 1> \
   --status backlog \
-  --assignee-id <Engineer instance UUID — either instance>
+  --assignee-id <exact owning Squad UUID>
 multica issue label add <e2e-id> <harness:e2e label-id>
 ```
 
-E2E owner is an **Engineer instance** (instance-neutral — not the Evaluator; the
-Evaluator reviews behavior afterward, but E2E is an Engineer responsibility).
+E2E ownership remains with the parent's exact Squad using
+`templates/squad-issue.md`; the leader activates an **Engineer instance** for
+execution and the declared Evaluator lane afterward.
 
 ### Retro (after E2E child closes)
 
