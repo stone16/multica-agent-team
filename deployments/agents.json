@@ -7,6 +7,14 @@
     "legacy_skill_names": ["CEO Skill"]
   },
   {
+    "logical_id": "orchestrator-fallback",
+    "desired_name": "Orchestrator-Fallback",
+    "profession": "orchestrator",
+    "runtime_provider": "codex",
+    "model": "gpt-5.6-sol",
+    "create_if_missing": true
+  },
+  {
     "logical_id": "pm",
     "profession": "pm",
     "runtime_provider": "claude",
@@ -40,7 +48,7 @@
     "logical_id": "evaluator-a",
     "desired_name": "Evaluator-A",
     "profession": "evaluator",
-    "runtime_provider": "grok",
+    "runtime_provider": "deepseek",
     "model": "",
     "create_if_missing": true
   },
@@ -48,8 +56,8 @@
     "logical_id": "evaluator-b",
     "desired_name": "Evaluator-B",
     "profession": "evaluator",
-    "runtime_provider": "grok",
-    "model": "",
+    "runtime_provider": "codex",
+    "model": "gpt-5.6-sol",
     "create_if_missing": true
   },
   {

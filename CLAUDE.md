@@ -36,12 +36,12 @@ The company keeps seven reusable Profession Profiles:
 
 | Profession | Stable responsibility | Deployment intent |
 |---|---|---|
-| Orchestrator | Own the objective, compose the smallest sufficient team, dispatch with a DoD, verify, and close | Claude runtime; one `claude-opus-5` instance initially |
+| Orchestrator | Own the objective, compose the smallest sufficient team, dispatch with a DoD, verify, and close | Primary Claude `claude-opus-5` lane plus a Codex `gpt-5.6-sol` entry fallback |
 | PM | Define user value, scope, PRDs, acceptance criteria, and product decisions | Claude runtime |
 | Designer | Define journeys, interactions, prototypes, and experience-quality decisions | Claude runtime |
 | Engineer | Design and implement correct, observable, reversible systems | Two Codex instances: Engineer-A and Engineer-B; both `gpt-5.6-sol` |
 | GTM | Positioning, launch, channel experiments, growth, and market feedback | Grok runtime default |
-| Evaluator | Independent behavioral, security, performance, and DoD verification | Two Grok runtime-default instances: Evaluator-A and Evaluator-B |
+| Evaluator | Independent behavioral, security, performance, and DoD verification | Evaluator-A on DeepSeek as the primary adversarial lane; Evaluator-B on Codex for independent verification and added capacity |
 | Researcher | Primary-source evidence, market/user/technical research, and uncertainty reduction | Claude runtime |
 
 Two instances sharing a profile are independent execution lanes, not new professions. Add a new Profession Profile only when a repeated responsibility has a materially different evidence contract, tool or permission boundary, or decision authority.
@@ -58,9 +58,9 @@ Maintain these five baseline Multica Squad objects:
 | Growth | Launch the product and improve acquisition, activation, retention, and commercial learning | `squads/growth/` |
 | Reliability | Maintain reliability, safety, incident response, and product health | `squads/reliability/` |
 
-Squad membership is a capability roster, not an instruction to activate everybody. For every run, the Orchestrator selects the smallest sufficient set of roles and states the distinct output expected from each activated member.
+Assign work to the owning Squad by default, not to a free-floating member. Squad membership is a capability roster, not an instruction to activate everybody. For every run, the active leader selects the smallest sufficient set of roles and states the distinct output expected from each activated member.
 
-An Issue has exactly one owning Squad at a time. Other Squads may be consulted through a child Issue or explicit mention. Transfer ownership only through an artifact-backed handoff with acceptance criteria; do not make `Discovery -> Experience -> Delivery -> Growth -> Reliability` an automatic waterfall.
+An Issue has exactly one owning Squad at a time. Its body is an execution contract with an outcome, context and evidence, acceptance criteria, non-goals, scope and target, verification tier, evidence requirements, and rework cap; use `templates/squad-issue.md`. Other Squads may be consulted through a bounded child Issue or an artifact-backed mention that states the exact question and expected return artifact. Transfer ownership only through an artifact-backed handoff with acceptance criteria; do not make `Discovery -> Experience -> Delivery -> Growth -> Reliability` an automatic waterfall.
 
 Keep one accountable initiative owner and one Project ledger across Squad transitions. If phase handoffs become the dominant source of rework for a mature product, create a domain/value-stream Squad that owns that product across its lifecycle while retaining the functional Squads as specialist capability pools.
 
@@ -96,7 +96,7 @@ company contract
 
 For each multi-step run:
 
-1. Read the Issue, relevant ledger artifacts, current Squad roster, and Squad instructions.
+1. Confirm the Issue is assigned to its owning Squad. Read its contract, relevant ledger artifacts, current Squad roster, Squad instructions, and threaded/system comments.
 2. State the objective, assumptions, risks, and acceptance criteria.
 3. Plan the minimum necessary role activations. Use deterministic code for routing, retries, validation, counting, sorting, and status transitions; use models for decomposition, ambiguous judgment, research, design, synthesis, and evaluation.
 4. Dispatch one bounded contract at a time with:
@@ -110,10 +110,16 @@ For each multi-step run:
    ```
 
 5. A member returns a mention-free delivery addressing every evidence item. The current Squad leader verifies it and chooses the next transition.
-6. Use one Evaluator for ordinary independent verification. Use both Evaluators only for high-risk, irreversible, security-sensitive, or explicitly dual-lens work. They receive independent pre-verdict contexts and do not coordinate until both verdicts exist.
+6. Use the DeepSeek-backed Evaluator as the primary adversarial lane. Use the Codex-backed Evaluator for a second independent lane, provider-diverse verification, or extra capacity. Use both only for high-risk, irreversible, security-sensitive, or explicitly dual-lens work. They receive independent pre-verdict contexts and do not coordinate until both verdicts exist; an author never verifies their own work.
 7. Close only when the acceptance criteria are evidenced. Promote durable results to the Project ledger and record unresolved risks explicitly.
 
 Only the current Squad leader may `@`-mention Squad members, and only for delegation. Members never route work by mention. A member's mention-free delivery returns control to the leader. Protocol identifiers such as `CEO_MENTION` or `ceo-resolved` may remain in automation for compatibility; they refer to the Orchestrator role.
+
+## Leader Entry Fallback
+
+Every baseline Squad declares `orchestrator` as its primary leader and `orchestrator-fallback` as a member with the same Orchestrator profession on a non-primary provider. If the primary leader fails before tool execution because its runtime, provider, authentication, or quota is unavailable, inspect threaded and system failure comments, then reroute steering to the declared fallback without changing the owning Squad, Issue contract, or durable context.
+
+The fallback has exactly the same authority boundary as the primary leader: plan, delegate, verify, escalate, and close; never implement. A provider/runtime/auth/quota failure before tool execution is an entry failure, not a work attempt, and does not consume the executor's or step's `max_rounds`. Once steering starts, ordinary evidence and rework rules apply.
 
 ## Context and Memory Boundaries
 

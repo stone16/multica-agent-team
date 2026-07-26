@@ -2,7 +2,9 @@
   "name": "Discovery",
   "description": "Find an evidence-backed target user, problem, opportunity, and positioning hypothesis before product commitment.",
   "leader": "orchestrator",
+  "fallback_leader": "orchestrator-fallback",
   "members": [
+    {"agent": "orchestrator-fallback", "role": "Entry-only fallback — assume steering after primary leader provider/runtime failure; never implement"},
     {"agent": "researcher", "role": "Default — primary-source evidence, market and user research, uncertainty map"},
     {"agent": "gtm", "role": "Default — alternatives, segment selection, positioning, and market test design"},
     {"agent": "pm", "role": "Default — user problem framing, product implications, and opportunity decision"},

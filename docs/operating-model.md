@@ -2,9 +2,9 @@
 
 This file contains the full technical operating model behind the bilingual project overview in the repository root. For the public introduction, see [`../README.md`](../README.md).
 
-Git source of truth for a reusable agent company operating on Multica: seven domain-neutral Profession Profiles, nine intended Agent Instances, and five persistent functional Squads. The Orchestrator leads each baseline Squad and composes the smallest sufficient team for every Issue-scoped run.
+Git source of truth for a reusable agent company operating on Multica: seven domain-neutral Profession Profiles, ten intended Agent Instances, and five persistent functional Squads. The primary Orchestrator leads each baseline Squad, with a Codex-backed entry fallback, and composes the smallest sufficient team for every Issue-scoped run.
 
-This repo is being prepared for public release. Tracked files use neutral logical instance names only (Engineer-A, Engineer-B, Evaluator-A, Evaluator-B — no personal names), and all operational identity mappings live in shell-local sync variables or GitHub Actions secrets/variables, never in tracked files.
+This repo is being prepared for public release. Tracked files use neutral logical instance names only (Orchestrator-Fallback, Engineer-A, Engineer-B, Evaluator-A, Evaluator-B — no personal names), and all operational identity mappings live in shell-local sync variables or GitHub Actions secrets/variables, never in tracked files.
 
 ## Layout
 
@@ -30,12 +30,12 @@ Seven professions, flat — vertical tiers are abolished. One directory per prof
 
 | # | Profession | Path | Runtime / model (desired) | Focus |
 |---|---|---|---|---|
-| 1 | Orchestrator | `agents/orchestrator/` | Claude / Opus 5 | Objective ownership, role activation, DoD dispatch, verification, closure, PR-review adjudication |
+| 1 | Orchestrator | `agents/orchestrator/` | Primary Claude / Opus 5; entry fallback Codex / `gpt-5.6-sol` | Objective ownership, role activation, DoD dispatch, verification, closure, PR-review adjudication |
 | 2 | PM | `agents/pm/` | Claude / Opus 5 | PRD, issue split, product decisions and review |
 | 3 | Designer | `agents/designer/` | Claude / Opus 5 | User journey, UX/UI, prototype and design review |
 | 4 | Engineer | `agents/engineer/` | Two Codex instances, both `gpt-5.6-sol` | Implementation and non-author peer review |
 | 5 | GTM | `agents/gtm/` | Grok runtime default | Positioning, launch, channel selection, growth experiments, market feedback |
-| 6 | Evaluator | `agents/evaluator/` | Two Grok runtime-default instances | Independent DoD, behavior, security and performance verification |
+| 6 | Evaluator | `agents/evaluator/` | Evaluator-A on DeepSeek; Evaluator-B on Codex / `gpt-5.6-sol` | Independent DoD, behavior, security and performance verification |
 | 7 | Researcher | `agents/researcher/` | Claude / Opus 5 | Primary-source-grounded evidence and uncertainty reduction |
 
 The Engineer instances share one profile, as do the two Evaluators. Instances provide capacity or independent judgment; they do not create Senior/Junior tiers. Provider/model intent lives in `deployments/agents.json`; existing personal display-name mappings are supplied only for the sync process.
@@ -50,7 +50,7 @@ The Engineer instances share one profile, as do the two Evaluators. Instances pr
 | Growth | Launch, acquisition, activation, retention, and commercial learning | GTM, PM |
 | Reliability | Reliability, incidents, safety, maintenance, and product health | Engineer, Evaluator |
 
-These are long-lived routing definitions, not permanent full-roster meetings or shared chat memory. An Issue has one owning Squad at a time, and each run activates only the roles with a distinct required output. Detailed entry/exit and artifact contracts live under `squads/`.
+These are long-lived routing definitions, not permanent full-roster meetings or shared chat memory. Assign each Issue to its owning Squad by default, not to a free-floating agent. An Issue has one owning Squad at a time, and each run activates only the roles with a distinct required output. Its body is an execution contract using `templates/squad-issue.md`, not a generic prompt. Detailed entry/exit and artifact contracts live under `squads/`.
 
 Assigning an Issue to a Squad tasks its Orchestrator. Everything after that is driven by Multica's native re-trigger: a member comment containing no mentions returns control to the current leader. No polling.
 
@@ -58,6 +58,18 @@ Assigning an Issue to a Squad tasks its Orchestrator. Everything after that is d
 2. **Member delivers** → a mention-free evidence delivery re-triggers the current leader.
 3. **Leader evaluates** → next step, independent Evaluator, capped rework, human gate, or close.
 4. **All steps done** → completion summary plus durable artifact links and residual risks.
+
+Cross-Squad consultation uses a bounded child Issue or an artifact-backed mention containing the exact question and expected return artifact. Ownership does not change unless an artifact-backed handoff explicitly says so.
+
+### Leader/provider entry fallback
+
+Every baseline Squad keeps `orchestrator` as its owning primary leader and declares `orchestrator-fallback` as a Squad member on Codex, a non-primary provider. If the primary leader fails before tool execution because its runtime, provider, authentication, or quota is unavailable, the system/operator inspects threaded and system failure comments and reroutes steering to the declared fallback. Squad ownership, Issue contract, ledger, and acceptance criteria do not change.
+
+The fallback uses the same Orchestrator profile and authority boundary: it may plan, delegate, verify, escalate, and close, but never implement. A pre-tool provider/runtime/auth/quota failure is an entry failure rather than a work attempt, so it does not consume the step's `max_rounds`. This repository declares and validates the fallback topology; implementing automatic platform rerouting remains outside this proposal.
+
+### Evaluator provider strategy
+
+Evaluator-A is the intended primary adversarial and independent-verification lane on DeepSeek. Evaluator-B is Codex-backed for a second independent lane, provider diversity, and additional verification capacity. Ordinary work uses one appropriate non-author Evaluator; high-risk or explicitly dual-lens work may use both with independent pre-verdict context. An author never verifies their own work.
 
 The stable state machine lives in `agents/orchestrator/skill.md`; each Squad's workflow contract lives in its own instructions. Discussions still run as `discussion`-label Issues, not chat sessions.
 
@@ -111,6 +123,7 @@ The `templates/` folder is local reference only. When an agent needs to output a
 | `change-proposal.md` | PM (wrap-up), Orchestrator (build-vs-buy decisions), GTM (launch and positioning decisions) |
 | `eval-rubric.md` | Evaluator |
 | `harness-task-spec.md` | Engineer (when work needs harness checkpoints) |
+| `squad-issue.md` | Squad leader and issue author (bounded run contract) |
 | `incident-report.md` | Anyone documenting a production incident |
 | `user-feedback-report.md` | PM, GTM (market feedback synthesis) |
 | `pr-description.md` | Any agent that opens a PR — the Engineer instances primarily; Evaluator when it ships tests or fixes |
