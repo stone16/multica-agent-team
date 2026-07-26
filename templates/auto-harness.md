@@ -130,6 +130,8 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
      --title "[harness:cp-NN] <checkpoint title>" \
      --description-stdin \
      --parent <parent-issue-id> \
+     --stage <1 for the first runnable frontier; N for later dependencies> \
+     --status <todo for Stage 1; backlog for later stages> \
      --assignee-id <Engineer instance UUID>
    multica issue label add <child-id> <harness:cp label-id>
    ```
@@ -149,13 +151,13 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
    - cp-02 → [STO-NNN](mention://issue/<id>) → Engineer
    - ...
 
-   I will re-check this thread after all child issues close.
+   Native stage barriers will wake the parent after each runnable frontier closes.
    ```
 
 4. After posting the checkpoint plan, set parent status `in_review`. Exit
    silently; dispatch is the CEO's move, not yours.
 
-### E2E Dispatch (after every checkpoint child is done)
+### E2E Dispatch (after the checkpoint stage barrier closes)
 
 A checkpoint child counts as closed ONLY when its status is `done` AND, where
 its `dod` specified `verification: evaluator`, the Evaluator's verification
@@ -163,11 +165,12 @@ verdict is PASS. `in_review` is explicitly NOT closed — a child awaiting
 evaluator verification still blocks this step. Do not propose the E2E child
 while any checkpoint fails that bar.
 
-You do not self-trigger this step: child deliveries re-trigger the CEO, not
-you. When the CEO observes (on any re-trigger) that ALL `harness:cp` children
-of the parent meet the bar above, the CEO posts a dispatch on the PARENT issue
-@-mentioning you, the proposing Engineer, with a DoD whose `outcome` is the
-`[auto-harness: e2e-plan]` delivery. On that dispatch, propose exactly one E2E
+You do not self-trigger this step. Only `done` and `cancelled` close the native
+checkpoint barrier; `blocked` holds it open. On the native barrier wake, the CEO
+reads `multica issue children`, verifies the acceptance bar above, and posts a
+dispatch on the PARENT issue @-mentioning you, the proposing Engineer, with a
+DoD whose `outcome` is the `[auto-harness: e2e-plan]` delivery. Native wake does
+not promote later work automatically. On that dispatch, propose exactly one E2E
 child in a comment on the parent — do not create it yourself:
 
 ```
@@ -183,14 +186,17 @@ suggested dod:
   max_rounds: 2
 ```
 
-The **CEO** creates the child issue and dispatches it with an inline `dod:`
-block (`outcome` / `evidence` / `verification` / `max_rounds`):
+The **CEO** creates the child issue parked in the later stage, then promotes it
+to `todo` after the checkpoint barrier wake and dispatches it with an inline
+`dod:` block (`outcome` / `evidence` / `verification` / `max_rounds`):
 
 ```
 multica issue create \
   --title "[harness:e2e] End-to-end verification for <parent title>" \
   --description-stdin \
   --parent <parent-issue-id> \
+  --stage <checkpoint stage + 1> \
+  --status backlog \
   --assignee-id <Engineer instance UUID — either instance>
 multica issue label add <e2e-id> <harness:e2e label-id>
 ```

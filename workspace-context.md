@@ -43,6 +43,7 @@ For structured artifacts, use the template from `templates/` verbatim:
 | Incident report | `templates/incident-report.md` |
 | User feedback summary | `templates/user-feedback-report.md` |
 | Pull Request description | `templates/pr-description.md` |
+| Squad Issue contract | `templates/squad-issue.md` |
 
 Do not invent ad-hoc structures.
 
@@ -76,7 +77,9 @@ A PR with any required section empty is a draft, not a request for review. Do no
 
 A PR description that does not contain validation evidence (screenshots for frontend, test output for backend) in `How I Tested` is rejected at first read by reviewers — the non-author Engineer instance in the peer lane and the Evaluator in the adversarial lane.
 
-## Dispatch & DoD
+## Squad Entry, Dispatch & DoD
+
+Assign a complex or multi-role goal to one exact owning Squad by UUID; do not have an external caller fan it out to several agents. A direct-agent path is allowed only when the work is trivial, single-owner, low-risk, has no cross-profession dependency, and needs no independent gate. Use `templates/squad-issue.md` for the Issue body.
 
 The Orchestrator is the leader of each baseline Squad. Assigning an issue to a Squad tasks its leader; the Squad leader plans, then dispatches each step in a delegation comment that @-mentions the executing member(s). Every delegation comment inlines a Definition of Done block:
 
@@ -98,6 +101,20 @@ Verification levels:
 | `human` | Irreversible actions: publishing, external sends, deploys |
 
 The executing agent's delivery comment MUST address each `dod.evidence` item with actual evidence, item by item. When `verification: evaluator`, the Orchestrator (on re-trigger) dispatches the Evaluator to independently verify before closing the step. When `verification: human`, the Squad leader asks the human and does not proceed until answered.
+
+No provider fallback is live merely because a tracked field or prose names one. Use a fallback only after that identity is deployed, belongs to each affected Squad, and passes a fresh topology verify. Until then, reruns stay with the current leader and sustained entry failures escalate with evidence.
+
+## Native Stages and Recovery
+
+Use staged child issues for dependencies, independent acceptance, retry/cancel boundaries, or a queryable graph: Stage 1 uses `--stage 1 --status todo`, while later stages use `--stage N --status backlog`. Same-stage work may run in parallel. Only `done` and `cancelled` close a barrier; `blocked` keeps it open. A barrier wake does not promote later children—the leader verifies dependencies and promotes eligible backlog work. Keep same-parent comment fan-out only for small, short, context-sharing analysis.
+
+Monitor with `issue get` for parent state, `issue children` for the work graph, `issue runs` for current and historical tasks, `issue run-messages` for event freshness, `issue metadata list` for the deterministic result index, and comments for evidence and steering. Stalled means no new event for the caller-configured freshness window, not merely a long total runtime. Recovery preserves completed evidence and re-dispatches only the missing artifact or verification lane.
+
+Cancellation is task-first: enumerate active tasks, cancel each with `issue cancel-task`, confirm no active rows remain, then set the parent and relevant children to `cancelled`. Status changes alone do not interrupt tasks.
+
+## Parent Result Contract
+
+Close in this order: post one consolidated parent result comment; write and verify `squad_verdict`, `squad_result_comment_id`, `squad_next_owner`, `squad_evidence_complete`, and caller-provided `correlation_id`; record `multica squad activity`; then change parent status. Metadata is a typed index only, and `runs[].result.output` is not the deliverable.
 
 ## Review Layering
 

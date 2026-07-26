@@ -50,14 +50,57 @@ The Engineer instances share one profile, as do the two Evaluators. Instances pr
 | Growth | Launch, acquisition, activation, retention, and commercial learning | GTM, PM |
 | Reliability | Reliability, incidents, safety, maintenance, and product health | Engineer, Evaluator |
 
-These are long-lived routing definitions, not permanent full-roster meetings or shared chat memory. An Issue has one owning Squad at a time, and each run activates only the roles with a distinct required output. Detailed entry/exit and artifact contracts live under `squads/`.
+These are long-lived routing definitions, not permanent full-roster meetings or shared chat memory. Assign complex or multi-role work to one exact owning Squad by UUID, and write its body from `templates/squad-issue.md`. An Issue has one owning Squad at a time, and each run activates only the roles with a distinct required output. Detailed entry/exit and artifact contracts live under `squads/`.
+
+Keep a direct-agent fast path only for work that is trivial, single-owner, low-risk, has no cross-profession dependency, and needs no independent gate. If any condition is false, the external caller assigns the owning Squad and lets its leader compose the lanes; it does not fan one goal out to several individual agents.
 
 Assigning an Issue to a Squad tasks its Orchestrator. Everything after that is driven by Multica's native re-trigger: a member comment containing no mentions returns control to the current leader. No polling.
 
 1. **Issue assigned to Squad** → Orchestrator reads the Issue, injected Squad instructions and roster, posts a plan, then ONE DoD-bearing delegation comment.
 2. **Member delivers** → a mention-free evidence delivery re-triggers the current leader.
 3. **Leader evaluates** → next step, independent Evaluator, capped rework, human gate, or close.
-4. **All steps done** → completion summary plus durable artifact links and residual risks.
+4. **All steps done** → one consolidated parent result comment → verified typed result metadata → Squad activity → parent status.
+
+### Leader/provider entry failure
+
+The currently deployed contract has no assumed fallback identity. `issue rerun` targets the issue's current assignment. A transient entry failure may rerun the current Squad leader; a sustained provider/runtime/auth/quota failure is escalated to the human with its run and system-comment evidence.
+
+A fallback becomes routable only after a separate Orchestrator identity is deployed, added to every affected Squad, and proved through a fresh topology verify. A repository field or prose claim alone is not deployment evidence. Automatic provider rerouting remains out of scope.
+
+### Native staged child work
+
+Use native staged child issues when work has dependencies, independent acceptance, retry/cancel boundaries, or needs a queryable graph. Stage 1 children use `--stage 1 --status todo`; later-stage children use `--stage N --status backlog`. Same-stage children may run in parallel.
+
+Only `done` and `cancelled` close a native barrier; `blocked` keeps the frontier open. The barrier wakes the parent assignee but does not automatically promote later backlog children. The leader reads `issue children`, checks declared dependencies, and promotes only eligible work. Same-parent comment fan-out remains appropriate only for short context-sharing analyses with no independent lifecycle needs.
+
+### Deterministic result contract
+
+The authoritative payload is one consolidated parent comment. Metadata provides the typed index and never duplicates the long payload:
+
+| Key | Type and value |
+|---|---|
+| `squad_verdict` | string: `delivered`, `inconclusive`, `blocked`, or `escalated` |
+| `squad_result_comment_id` | string UUID of the consolidated comment |
+| `squad_next_owner` | string: exact Squad name or `none` |
+| `squad_evidence_complete` | boolean |
+| `correlation_id` | caller-provided string echoed unchanged |
+
+The close sequence is fixed: post the comment, write and read back all five metadata keys, record `multica squad activity` with a concise reason, then change parent status. `runs[].result.output` is execution narration, not the final deliverable.
+
+### Monitoring, steering, recovery, and cancellation
+
+| Need | Source |
+|---|---|
+| Parent business state | `multica issue get` |
+| Stage/work graph | `multica issue children` |
+| Current and historical task ledger | `multica issue runs` |
+| Event freshness/progress | `multica issue run-messages --since` |
+| Deterministic result index | `multica issue metadata list` |
+| Evidence and caller steering | comments |
+
+Classify a task as stalled only when no new run-message event arrives during the caller-configured freshness window; total elapsed runtime alone is insufficient. Preserve existing runs, messages, and artifacts, then re-dispatch only the missing artifact or verification lane.
+
+Cancellation is task-first: enumerate active task IDs, cancel every active task with `issue cancel-task`, re-read runs until none remain active, then set the parent and relevant children to `cancelled`. An issue status change records business state but does not interrupt active execution.
 
 The stable state machine lives in `agents/orchestrator/skill.md`; each Squad's workflow contract lives in its own instructions. Discussions still run as `discussion`-label Issues, not chat sessions.
 
@@ -111,6 +154,7 @@ The `templates/` folder is local reference only. When an agent needs to output a
 | `change-proposal.md` | PM (wrap-up), Orchestrator (build-vs-buy decisions), GTM (launch and positioning decisions) |
 | `eval-rubric.md` | Evaluator |
 | `harness-task-spec.md` | Engineer (when work needs harness checkpoints) |
+| `squad-issue.md` | External caller and Squad leader (bounded invocation and result contract) |
 | `incident-report.md` | Anyone documenting a production incident |
 | `user-feedback-report.md` | PM, GTM (market feedback synthesis) |
 | `pr-description.md` | Any agent that opens a PR — the Engineer instances primarily; Evaluator when it ships tests or fixes |
@@ -267,12 +311,16 @@ scripts/sync-multica.sh --verify           # fresh read; nonzero if any managed 
 
 Dry-run is the default; only `--apply` writes. Both apply modes require a clean `main` at `origin/main`; verify always performs new Multica reads. `sync-topology.py` creates only tracked Squads and Agent Instances explicitly marked `create_if_missing`, and fails closed on extra members instead of pruning them. Auth is ambient, while UUIDs and runtime IDs remain deployed state and are never committed. Use the repo-local `$sync-multica` skill for the complete topology → content → fresh verify sequence.
 
+Before automating against the CLI, record both caller and selected runtime Multica CLI versions. Depend only on fields observed on both versions; a version mismatch is a compatibility boundary, not permission to guess.
+
 ## Do Not
 
 - Do not introduce a shared `skills/` folder. Each agent owns its full skill content.
 - Do not overwrite team-specific template content (roster, routing preamble) from upstream — it is canonical in this repo; only the generic section skeleton mirrors `stone16/harness-template`.
 - Do not introduce a new profession without an entry in the Roster table and a corresponding `agents/<role>/` folder with both files, then a re-sync.
-- Do not let anyone but the current Squad leader @-mention a member, and only in delegation comments. Members' delivery comments are mention-free — that is what returns control to the leader and keeps mention cycles structurally impossible.
+- Do not let anyone but the current Squad leader @-mention a member, and only in delegation comments. Members' delivery comments are mention-free — that is what returns control to the leader and keeps mention cycles structurally impossible. External callers assign the Squad; they do not mention several members.
+- Do not advertise a fallback until a fresh topology read proves that identity is deployed and belongs to the affected Squads.
+- Do not treat parent/child status as task cancellation; interrupt active task IDs first.
 - Do not dispatch work without an inline DoD block, and do not close a step whose delivery has not addressed every `dod.evidence` item.
 - Do not commit a sentinel-writing change without updating `agents/engineer/skill.md` AND `agents/evaluator/skill.md` plus `tests/pr-sweep.test.sh`, then syncing to Multica — sentinel formats must stay in lock-step.
 - Do not commit operational identity: agent UUIDs, mention links, workspace ids, tokens, or private repo names belong in GitHub Actions secrets/variables, not tracked files.
