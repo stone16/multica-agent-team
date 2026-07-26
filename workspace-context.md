@@ -43,6 +43,7 @@ For structured artifacts, use the template from `templates/` verbatim:
 | Incident report | `templates/incident-report.md` |
 | User feedback summary | `templates/user-feedback-report.md` |
 | Pull Request description | `templates/pr-description.md` |
+| Squad Issue contract | `templates/squad-issue.md` |
 
 Do not invent ad-hoc structures.
 
@@ -78,7 +79,7 @@ A PR description that does not contain validation evidence (screenshots for fron
 
 ## Dispatch & DoD
 
-The Orchestrator is the leader of each baseline Squad. Assigning an issue to a Squad tasks its leader; the Squad leader plans, then dispatches each step in a delegation comment that @-mentions the executing member(s). Every delegation comment inlines a Definition of Done block:
+Assign issues to their owning Squad by default, not to a free-floating agent. The Issue body is the run contract; use `templates/squad-issue.md` so it carries the outcome, context/evidence, acceptance criteria, non-goals, scope/target, verification tier, required evidence, and rework cap. The Orchestrator is the primary leader of each baseline Squad. Assigning an issue to a Squad tasks its active leader; the leader plans, routes, verifies, and closes, while members implement or investigate. Every delegation comment inlines a Definition of Done block:
 
 ```yaml
 dod:
@@ -98,6 +99,16 @@ Verification levels:
 | `human` | Irreversible actions: publishing, external sends, deploys |
 
 The executing agent's delivery comment MUST address each `dod.evidence` item with actual evidence, item by item. When `verification: evaluator`, the Orchestrator (on re-trigger) dispatches the Evaluator to independently verify before closing the step. When `verification: human`, the Squad leader asks the human and does not proceed until answered.
+
+Cross-Squad consultation uses a bounded child Issue or an artifact-backed mention containing the exact question and expected return artifact. It does not silently transfer ownership.
+
+## Leader Entry Fallback
+
+Each baseline Squad declares a Codex-backed `orchestrator-fallback` member. If the primary Claude leader fails before tool execution because of provider, runtime, authentication, or quota failure, inspect threaded and system failure comments and reroute steering to that fallback without changing the owning Squad or Issue contract. The fallback has the same no-implementation boundary as the primary: plan, delegate, verify, escalate, and close only. Pre-tool entry failures do not consume a work rework round.
+
+## Evaluator Provider Lanes
+
+Evaluator-A is the intended primary adversarial/independent verification lane on DeepSeek. Evaluator-B is Codex-backed for a second independent lane, provider diversity, and added verification capacity. Keep evaluator contexts independent until verdicts exist, and never allow an author to verify their own work.
 
 ## Review Layering
 

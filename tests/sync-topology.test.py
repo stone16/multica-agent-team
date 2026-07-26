@@ -288,6 +288,36 @@ def test_extra_members_fail_closed() -> None:
     assert "automatic removal is intentionally forbidden" in result.stderr
 
 
+def test_repository_provider_and_squad_invocation_policy() -> None:
+    deployments = json.loads((ROOT / "deployments/agents.json").read_text())
+    by_id = {item["logical_id"]: item for item in deployments}
+
+    primary = by_id["orchestrator"]
+    fallback = by_id["orchestrator-fallback"]
+    assert fallback["profession"] == primary["profession"] == "orchestrator"
+    assert fallback["runtime_provider"] != primary["runtime_provider"]
+    assert by_id["evaluator-a"]["runtime_provider"] == "deepseek"
+    assert by_id["evaluator-b"]["runtime_provider"] == "codex"
+
+    for manifest in sorted((ROOT / "squads").glob("*/squad.json")):
+        squad = json.loads(manifest.read_text())
+        assert squad["fallback_leader"] == "orchestrator-fallback", manifest
+        assert squad["fallback_leader"] in {
+            member["agent"] for member in squad["members"]
+        }, manifest
+
+    assert (ROOT / "templates/squad-issue.md").is_file()
+
+    fixture = make_fixture("drift")
+    fixture_manifest = fixture / "repo/squads/discovery/squad.json"
+    squad = json.loads(fixture_manifest.read_text())
+    squad["fallback_leader"] = "evaluator-a"
+    fixture_manifest.write_text(json.dumps(squad))
+    result = run_fixture(fixture)
+    assert result.returncode != 0
+    assert "fallback_leader must share the leader profession" in result.stderr
+
+
 def main() -> None:
     test_plan_is_read_only()
     test_apply_creates_missing_instance_and_squad()
@@ -295,6 +325,7 @@ def main() -> None:
     test_apply_keeps_identity_across_rename_and_runtime_change()
     test_verify_rejects_drift_and_accepts_convergence()
     test_extra_members_fail_closed()
+    test_repository_provider_and_squad_invocation_policy()
     print("PASS: topology desired-state tests")
 
 

@@ -2,7 +2,9 @@
   "name": "Experience",
   "description": "Turn a validated user problem into a coherent journey, testable product definition, and PRD-ready evidence.",
   "leader": "orchestrator",
+  "fallback_leader": "orchestrator-fallback",
   "members": [
+    {"agent": "orchestrator-fallback", "role": "Entry-only fallback — assume steering after primary leader provider/runtime failure; never implement"},
     {"agent": "pm", "role": "Default — outcome, scope, PRD, acceptance criteria, and product decisions"},
     {"agent": "designer", "role": "Default — user journey, interaction model, prototype, and experience review"},
     {"agent": "researcher", "role": "Optional — fill evidence gaps and validate user assumptions"},

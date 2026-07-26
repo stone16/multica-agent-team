@@ -24,7 +24,7 @@ Multica Agent Team 是一个公开的、可复用的 Agent 公司 Git 事实源�
 - Issue-scoped Run：一次具体任务的目标、上下文、证据和剩余风险。
 - Project ledger：经过审阅后可以长期保留的事实、决策和交付物。
 
-当前基线包含七个 Profession Profile、九个预期 Agent Instance 和五个持久化功能 Squad。每次任务不会默认唤起整个 Squad；Orchestrator 会选择足够完成任务的最小角色集合，并为每个角色定义边界清晰的 Definition of Done。
+当前基线包含七个 Profession Profile、十个预期 Agent Instance 和五个持久化功能 Squad。Issue 默认分配给负责的 Squad，而不是游离的单个 Agent；每次任务不会默认唤起整个 Squad，当前 Leader 会选择足够完成任务的最小角色集合，并为每个角色定义边界清晰的 Definition of Done。
 
 ## 核心理念：稳定契约，部署可变
 
@@ -46,6 +46,8 @@ Multica Agent Team 是一个公开的、可复用的 Agent 公司 Git 事实源�
 5. 任务关闭、交接，或明确记录剩余风险。
 
 DoD 至少包含：可观察的结果、所需证据、验证方式和返工上限。确定性的路由、重试、校验、计数、排序和状态转换交给代码；有歧义的拆解、研究、设计、综合和评估交给模型判断。
+
+每个基线 Squad 都声明一个 Codex 驱动的 Leader 入口备用通道：当主 Leader 在工具执行前因 Provider、Runtime、认证或额度失败时，保留原 Squad 和 Issue 契约，将 Steering 转给备用通道，并且不消耗返工轮次。Evaluator 策略以 DeepSeek 为主要对抗审查通道，以 Codex 作为第二个独立验证/扩容通道；作者不得验证自己的工作。
 
 ## 仓库包含什么
 

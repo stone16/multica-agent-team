@@ -22,7 +22,7 @@
 
 Multica Agent Team is the Git source of truth for a reusable agent company. It separates stable professional capability from deployable agent identities, long-lived Squad routing, and short-lived Issue runs. This public reference project is designed to make multi-agent work understandable, reviewable, and portable across model providers.
 
-The current baseline contains seven Profession Profiles, nine intended Agent Instances, and five persistent functional Squads. A Squad does not activate its entire roster for every task: the Orchestrator selects the smallest sufficient team and gives each activated role a bounded Definition of Done.
+The current baseline contains seven Profession Profiles, ten intended Agent Instances, and five persistent functional Squads. Issues are assigned to an owning Squad by default. A Squad does not activate its entire roster for every task: its active leader selects the smallest sufficient team and gives each activated role a bounded Definition of Done.
 
 ### The core idea: stable contract, changeable deployment
 
@@ -63,7 +63,7 @@ sequenceDiagram
     participant O as Orchestrator
     participant M as Activated member
     participant V as Evaluator / human
-    I->>O: Bounded objective + acceptance criteria
+    I->>O: Squad-owned contract + acceptance criteria
     O->>O: Select minimum roles and write DoD
     O->>M: One delegation contract
     M-->>O: Mention-free delivery + evidence
@@ -73,6 +73,8 @@ sequenceDiagram
 ```
 
 Every delegation defines an observable outcome, required evidence, verification level, and a rework cap. This keeps model judgment in ambiguous work while deterministic code handles routing, retries, validation, counting, sorting, and status transitions.
+
+Each baseline Squad declares a Codex-backed fallback for a primary leader failure before tool execution; the owning Squad and contract stay unchanged, and the entry failure does not consume a rework round. Evaluation uses DeepSeek as the intended primary adversarial lane and Codex as the second independent/capacity lane. Evaluators remain independent, and authors never verify their own work.
 
 ### What is included
 

@@ -105,11 +105,26 @@ def load_desired() -> tuple[list[dict], list[dict]]:
         raise TopologyError("no squad manifests found")
 
     known = set(logical_ids)
+    deployment_by_id = {item["logical_id"]: item for item in deployments}
     for squad in squads:
         refs = [squad["leader"], *[member["agent"] for member in squad["members"]]]
         missing = sorted(set(refs) - known)
         if missing:
             raise TopologyError(f"{squad['source']} references unknown agents: {', '.join(missing)}")
+        fallback_id = squad.get("fallback_leader")
+        if fallback_id:
+            if fallback_id not in known:
+                raise TopologyError(f"{squad['source']} references unknown fallback leader: {fallback_id}")
+            if fallback_id == squad["leader"]:
+                raise TopologyError(f"{squad['source']} fallback_leader must differ from leader")
+            if fallback_id not in {member["agent"] for member in squad["members"]}:
+                raise TopologyError(f"{squad['source']} fallback_leader must also be a member")
+            primary = deployment_by_id[squad["leader"]]
+            fallback = deployment_by_id[fallback_id]
+            if primary["profession"] != fallback["profession"]:
+                raise TopologyError(f"{squad['source']} fallback_leader must share the leader profession")
+            if norm(primary["runtime_provider"]) == norm(fallback["runtime_provider"]):
+                raise TopologyError(f"{squad['source']} fallback_leader must use a different provider")
     return deployments, squads
 
 

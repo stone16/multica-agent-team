@@ -2,7 +2,9 @@
   "name": "Growth",
   "description": "Launch products and improve acquisition, activation, retention, and commercial learning through measured experiments.",
   "leader": "orchestrator",
+  "fallback_leader": "orchestrator-fallback",
   "members": [
+    {"agent": "orchestrator-fallback", "role": "Entry-only fallback — assume steering after primary leader provider/runtime failure; never implement"},
     {"agent": "gtm", "role": "Default — positioning, launch sequence, channel strategy, experiment design, and market feedback"},
     {"agent": "pm", "role": "Default — product metric, activation and retention decisions, and experiment scope"},
     {"agent": "designer", "role": "Optional — acquisition, onboarding, activation, and retention experience"},

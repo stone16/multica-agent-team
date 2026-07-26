@@ -2,7 +2,9 @@
   "name": "Reliability",
   "description": "Maintain service reliability, safety, incident response, and long-term product health with measurable evidence.",
   "leader": "orchestrator",
+  "fallback_leader": "orchestrator-fallback",
   "members": [
+    {"agent": "orchestrator-fallback", "role": "Entry-only fallback — assume steering after primary leader provider/runtime failure; never implement"},
     {"agent": "engineer-a", "role": "Default — triage, diagnosis, remediation, automation, and operational ownership"},
     {"agent": "engineer-b", "role": "Default peer lane or alternate responder; never self-review"},
     {"agent": "evaluator-a", "role": "Default — reproduce incidents and independently verify fixes and regressions"},

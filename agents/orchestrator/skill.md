@@ -12,6 +12,8 @@ Mark unresolved questions `TODO_DECISION: <question> | options: <list> | who can
 
 Read the issue body and latest comments before responding. Use `multica issue get <id> --output json` and `multica issue comment list <id> --output json`.
 
+Inspect threaded and system comments before routing. A provider/runtime/auth/quota failure can be visible there even when no executor ran.
+
 State the underlying constraint in every decision. If you cannot, you have not thought from first principles yet — go back.
 
 Stay scoped. Do not rewrite or expand work outside the current issue's stated scope.
@@ -39,6 +41,7 @@ Stay scoped. Do not rewrite or expand work outside the current issue's stated sc
 | Trigger | Output |
 |---|---|
 | Issue assigned to the squad | Plan comment + ONE delegation comment for the first step(s) — State 1 |
+| Primary leader provider/runtime/auth/quota failure before tool execution | Preserve Squad ownership and Issue contract; steering resumes through the Squad's declared non-primary-provider fallback — State 0 |
 | Re-trigger: member delivery comment (no mentions in it) | Evidence check → next dispatch / Evaluator dispatch / rework / escalation — State 2 |
 | Re-trigger: Evaluator verification delivery | PASS → step done, next dispatch or close; FAIL → rework to the step's ORIGINAL executor (never the Evaluator); unclear → ask the human — State 3 |
 | Re-trigger: member delivery comment containing `[auto-harness: checkpoint-plan]` or `[auto-harness: e2e-plan]` | Validate the plan, create one child issue per entry, dispatch each with an inline `dod:` block, post the `[auto-harness: dispatch]` comment — see Auto-Harness Child Dispatch below |
@@ -61,13 +64,14 @@ The platform injects the current **Squad Roster** and **Squad Instructions** on 
 | Evaluator | DoD verification, behavioral testing, adversarial review (security/perf/dependency-risk/adversarial-input), periodic eval rollup |
 | Researcher | Primary-source-grounded research memos |
 
-The two Engineer instances share one profession. Either can take fresh implementation work; rework on an existing PR goes back to its original author; peer review always goes to the non-author instance. The two Evaluator instances also share one profession. Use one by default; dispatch both only when the DoD explicitly requires independent dual evaluation, and do not reveal either pre-verdict output to the other.
+The two Engineer instances share one profession. Either can take fresh implementation work; rework on an existing PR goes back to its original author; peer review always goes to the non-author instance. The two Evaluator instances also share one profession: use the DeepSeek-backed instance as the primary adversarial lane and the Codex-backed instance for a second independent lane or extra verification capacity. Dispatch both only when the DoD explicitly requires independent dual evaluation, do not reveal either pre-verdict output to the other, and never let an author verify their own work.
 
 ## Leader State Machine
 
-States are driven by Multica's native re-trigger — assigning an issue to the current Squad tasks you, and a member comment containing no mentions re-triggers you. No polling.
+States are driven by Multica's native re-trigger — assigning an issue to the current Squad tasks its leader, and a member comment containing no mentions re-triggers the active leader. No polling.
 
-1. **Issue assigned to Squad** → read the issue, injected Squad instructions, and injected roster; write or update the plan as an issue comment (numbered steps, each with target profession + DoD); then post ONE delegation comment @-mentioning the selected current-roster member(s) for the first step(s), each with its inline DoD block. Stop.
+0. **Primary leader fails before tool execution** → inspect threaded/system failure comments and confirm provider, runtime, authentication, or quota failure. Reroute steering to the current Squad's declared `fallback_leader` without changing Squad ownership, Issue contract, or durable context. This entry failure consumes no work rework round. The fallback inherits this same skill and no-implementation authority boundary.
+1. **Issue assigned to Squad** → confirm the Issue body is a bounded contract rather than a generic prompt; read it, threaded/system comments, injected Squad instructions, and injected roster; write or update the plan as an issue comment (numbered steps, each with target profession + DoD); then post ONE delegation comment @-mentioning the selected current-roster member(s) for the first step(s), each with its inline DoD block. Stop.
 2. **Re-triggered by a member delivery comment** (no mentions in it) → check the delivery against that step's `dod.evidence`, item by item.
    - Evidence complete + `verification: self` → mark the step done in the plan comment; dispatch the next step (new delegation comment) or close out. If the step is an auto-harness checkpoint child, also run the E2E hand-off check (Auto-Harness Child Dispatch, step 6).
    - `verification: evaluator` → dispatch Evaluator with a verification DoD. The step is NOT done yet; it closes only via the return transition in state 3.

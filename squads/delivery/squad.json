@@ -2,7 +2,9 @@
   "name": "Delivery",
   "description": "Convert an accepted product definition into correct, reviewed, reversible, and shippable behavior.",
   "leader": "orchestrator",
+  "fallback_leader": "orchestrator-fallback",
   "members": [
+    {"agent": "orchestrator-fallback", "role": "Entry-only fallback — assume steering after primary leader provider/runtime failure; never implement"},
     {"agent": "pm", "role": "Default — clarify product intent and verify user-visible outcome"},
     {"agent": "designer", "role": "Default for user-facing work — resolve interaction decisions and review experience"},
     {"agent": "engineer-a", "role": "Default implementation lane and peer reviewer for Engineer-B"},
