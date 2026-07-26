@@ -6,6 +6,7 @@
 #   - workspace-context.md                  → `multica workspace update --context-stdin`
 # For every profession directory under agents/:
 #   - skill : agents/<role>/skill.md       → `multica skill update` (create when absent)
+#   - files : agents/<role>/files/**       → `multica skill files upsert`
 #   - agent : agents/<role>/personality.md → `multica agent update --instructions`
 #   - mount : resolved profession skill     → `multica agent skills add`
 #
@@ -316,6 +317,91 @@ sys.exit(0 if a == b else 1)
 PY
 }
 
+sync_skill_files() {
+  local role="$1" skill_id="$2" files_root="agents/$1/files"
+  local remote_json remote_err relative_path local_file remote_file status remote_exists
+  local -a local_paths=()
+  [[ -d "$files_root" ]] || return 0
+
+  remote_json="$WORK_DIR/skill-files-$role.json"
+  remote_err="$WORK_DIR/skill-files-$role.err"
+  if ! read_json_with_retry "$remote_json" "$remote_err" \
+      multica skill files list "$skill_id" --output json; then
+    log "[$role] failed to list supporting files for skill $skill_id:"
+    cat "$remote_err" >&2
+    add_row "$role" "skill-file" "-" "failed"
+    ERRORS=$((ERRORS + 1))
+    return 0
+  fi
+
+  while IFS= read -r local_file; do
+    local_paths+=("${local_file#${files_root}/}")
+  done < <(find "$files_root" -type f ! -path '*/__pycache__/*' ! -name '*.pyc' -print | LC_ALL=C sort)
+
+  if ! python3 - "$remote_json" "${local_paths[@]}" > "$WORK_DIR/unmanaged-skill-files-$role" << 'PY'
+import json, sys
+managed = set(sys.argv[2:])
+unmanaged = [item.get("path") or "<empty>" for item in json.load(open(sys.argv[1])) if item.get("path") not in managed]
+if unmanaged:
+    print("\n".join(unmanaged))
+    raise SystemExit(1)
+PY
+  then
+    log "[$role] server skill has supporting files absent from agents/$role/files; refusing an incomplete desired-state claim:"
+    cat "$WORK_DIR/unmanaged-skill-files-$role" >&2
+    add_row "$role" "skill-file" "unmanaged remote" "failed"
+    ERRORS=$((ERRORS + 1))
+    return 0
+  fi
+
+  for relative_path in "${local_paths[@]}"; do
+    local_file="$files_root/$relative_path"
+    remote_file="$(mktemp "$WORK_DIR/remote-skill-file-$role.XXXXXX")"
+    if python3 - "$remote_json" "$relative_path" > "$remote_file" << 'PY'
+import json, sys
+for item in json.load(open(sys.argv[1])):
+    if item.get("path") == sys.argv[2]:
+        sys.stdout.write(item.get("content") or "")
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+    then
+      remote_exists=0
+    else
+      remote_exists=1
+    fi
+    if [[ "$remote_exists" -eq 0 ]] && same_content "$local_file" "$remote_file"; then
+      add_row "$role" "skill-file" "$relative_path" "up-to-date"
+      continue
+    fi
+
+    mark_drift
+    log "[$role] supporting skill file '$relative_path' differs or is missing — upsert"
+    log "  \$ multica skill files upsert $skill_id --path $relative_path --content-file $local_file"
+    if [[ "$APPLY" -eq 1 ]]; then
+      if multica skill files upsert "$skill_id" --path "$relative_path" --content-file "$local_file" > /dev/null; then
+        status="$([[ "$remote_exists" -eq 0 ]] && printf updated || printf created)"
+      else
+        status="failed"
+        ERRORS=$((ERRORS + 1))
+      fi
+    elif [[ "$VERIFY" -eq 1 ]]; then
+      status="$([[ "$remote_exists" -eq 0 ]] && printf drift || printf missing)"
+    else
+      status="$([[ "$remote_exists" -eq 0 ]] && printf 'would update' || printf 'would create')"
+    fi
+    add_row "$role" "skill-file" "$relative_path" "$status"
+  done
+}
+
+record_deferred_skill_files() {
+  local role="$1" status="$2" files_root="agents/$1/files" supporting_file
+  [[ -d "$files_root" ]] || return 0
+  while IFS= read -r supporting_file; do
+    add_row "$role" "skill-file" "${supporting_file#${files_root}/}" "$status"
+  done < <(find "$files_root" -type f ! -path '*/__pycache__/*' ! -name '*.pyc' -print | LC_ALL=C sort)
+}
+
 # ---------- Summary bookkeeping ----------
 
 SUMMARY_ROWS=()
@@ -424,6 +510,12 @@ PY
       status="would create"
     fi
     add_row "$role" "skill" "$name" "$status"
+    if [[ -n "${skill_id:-}" ]]; then
+      sync_skill_files "$role" "$skill_id"
+    elif [[ -d "agents/$role/files" ]]; then
+      record_deferred_skill_files "$role" \
+        "$([[ "$VERIFY" -eq 1 ]] && printf 'missing skill' || printf 'would create after skill')"
+    fi
     return 0
   fi
 
@@ -440,6 +532,7 @@ PY
 
   if same_content "$file" "$WORK_DIR/remote-skill"; then
     add_row "$role" "skill" "$remote_name" "up-to-date"
+    sync_skill_files "$role" "$skill_id"
     return 0
   fi
 
@@ -459,6 +552,9 @@ PY
     status="would update"
   fi
   add_row "$role" "skill" "$remote_name" "$status"
+  if [[ "$status" != "failed" ]]; then
+    sync_skill_files "$role" "$skill_id"
+  fi
 }
 
 # ---------- Sync: profession skill assignment ----------

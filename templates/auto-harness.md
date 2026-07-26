@@ -98,24 +98,48 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
 2. Parse every `### Checkpoint NN: <title>` header. **Do NOT create or assign
    child issues yourself** — issue creation and assignment are CEO-owned
    dispatch under the constitution's DoD Dispatch Protocol. Instead, return a
-   checkpoint PLAN in your delivery comment on the parent issue:
+   checkpoint PLAN in your delivery comment on the parent issue. Every checkpoint
+   object must preserve an explicit native `stage` and the complete list of
+   prerequisite checkpoint IDs in `depends_on`. Stage 1 has no dependencies;
+   each later checkpoint's stage is one greater than the latest stage among its
+   dependencies. If the spec does not define enough information to produce that
+   graph, report `[auto-harness: checkpoint-plan-invalid]` and the ambiguity;
+   never omit or guess either field.
 
-   ```
    [auto-harness: checkpoint-plan]
 
    Spec: <repo>/.harness/<task-id>/spec.md
-   Proposed children (for CEO dispatch):
+   Proposed children (for CEO dispatch; the fenced JSON array is authoritative):
 
-   - cp-01 "<checkpoint title>"
-     body: <the checkpoint's `#### Scope`, `#### Acceptance Criteria`, and
-       `#### Verification Commands` inlined verbatim from the spec — the
-       child agent must get self-contained context>
-     suggested dod:
-       outcome: <one sentence: what state counts as this checkpoint done>
-       evidence: <what proof must be attached: test output / screenshots / links>
-       verification: self | evaluator | human
-       max_rounds: 2
-   - cp-02 ...
+   ```json
+   [
+     {
+       "id": "cp-01",
+       "title": "Produce prerequisite artifact",
+       "stage": 1,
+       "depends_on": [],
+       "body": "The checkpoint's Scope, Acceptance Criteria, and Verification Commands inlined verbatim from the spec.",
+       "suggested_dod": {
+         "outcome": "The prerequisite artifact is accepted.",
+         "evidence": "Verification output and artifact link.",
+         "verification": "evaluator",
+         "max_rounds": 2
+       }
+     },
+     {
+       "id": "cp-02",
+       "title": "Consume prerequisite artifact",
+       "stage": 2,
+       "depends_on": ["cp-01"],
+       "body": "The dependent checkpoint's Scope, Acceptance Criteria, and Verification Commands inlined verbatim from the spec.",
+       "suggested_dod": {
+         "outcome": "The dependent behavior is accepted.",
+         "evidence": "Verification output proving the prerequisite was consumed.",
+         "verification": "evaluator",
+         "max_rounds": 2
+       }
+     }
+   ]
    ```
 
    Suggested assignees are advisory: every implementation checkpoint goes to
@@ -123,15 +147,22 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
    takes fresh work). Vertical tiers are abolished; do not route by perceived
    difficulty.
 
-3. The **CEO** creates and dispatches every child issue from that plan:
+3. The **CEO** validates the authoritative JSON graph before creating any child,
+   then creates and dispatches every child issue with the validator's exact
+   stage/status result. The child description must begin with the validated
+   `Checkpoint ID: <id>`, `Stage: <N>`, and
+   `Depends on: <comma-separated IDs | none>` header so the dependency identities
+   remain queryable after creation:
 
-   ```
+   ```bash
+   python3 <orchestrator-skill-dir>/scripts/validate-checkpoint-plan.py ./checkpoint-plan.json
+
    multica issue create \
      --title "[harness:cp-NN] <checkpoint title>" \
      --description-stdin \
      --parent <parent-issue-id> \
-     --stage <1 for the first runnable frontier; N for later dependencies> \
-     --status <todo for Stage 1; backlog for later stages> \
+     --stage <validated stage> \
+     --status <validated status> \
      --assignee-id <Engineer instance UUID>
    multica issue label add <child-id> <harness:cp label-id>
    ```

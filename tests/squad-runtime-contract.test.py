@@ -4,6 +4,9 @@
 import json
 import os
 from pathlib import Path
+import subprocess
+import tempfile
+import textwrap
 
 
 ROOT = Path(os.environ.get("CONTRACT_ROOT", Path(__file__).resolve().parents[1])).resolve()
@@ -19,6 +22,35 @@ def assert_in_order(text: str, *needles: str) -> None:
         position = text.find(needle, offset)
         assert position >= 0, f"missing or out of order: {needle}"
         offset = position + len(needle)
+
+
+def checkpoint_plan_from_template() -> list[dict[str, object]]:
+    template = read("templates/auto-harness.md")
+    marker = "[auto-harness: checkpoint-plan]"
+    assert marker in template, "checkpoint plan must contain a fenced JSON array"
+    plan_section = template.split(marker, 1)[1]
+    assert "```json\n" in plan_section, "checkpoint plan must contain a fenced JSON array"
+    payload = plan_section.split("```json\n", 1)[1].split("\n   ```", 1)[0]
+    payload = textwrap.dedent(payload)
+    plan = json.loads(payload)
+    assert isinstance(plan, list), "checkpoint plan payload must be an array"
+    return plan
+
+
+def run_checkpoint_plan_validator(plan: object) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        plan_path = Path(temp_dir) / "checkpoint-plan.json"
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        return subprocess.run(
+            [
+                "python3",
+                str(ROOT / "agents/orchestrator/files/scripts/validate-checkpoint-plan.py"),
+                str(plan_path),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
 
 
 def test_mirrored_company_contract() -> None:
@@ -114,9 +146,86 @@ def test_native_stage_contract() -> None:
     assert "`blocked` keeps the frontier open" in orchestrator
     assert "does not promote later backlog children" in orchestrator
     assert "when ALL `harness:cp` children" not in orchestrator
-    assert "--stage <1 for the first runnable frontier" in harness
-    assert "--status <todo for Stage 1; backlog for later stages>" in harness
+    assert (
+        "--stage <1 for the first runnable frontier" in harness
+        or "--stage <validated stage>" in harness
+    )
+    assert (
+        "--status <todo for Stage 1; backlog for later stages>" in harness
+        or "--status <validated status>" in harness
+    )
     assert "When the CEO observes (on any re-trigger) that ALL" not in harness
+
+
+def test_checkpoint_plan_graph_contract() -> None:
+    orchestrator = read("agents/orchestrator/skill.md")
+    plan = checkpoint_plan_from_template()
+    result = run_checkpoint_plan_validator(plan)
+    assert result.returncode == 0, result.stderr or result.stdout
+    normalized = json.loads(result.stdout)
+    assert normalized == {
+        "children": [
+            {
+                "create_args": ["--stage", "1", "--status", "todo"],
+                "depends_on": [],
+                "id": "cp-01",
+            },
+            {
+                "create_args": ["--stage", "2", "--status", "backlog"],
+                "depends_on": ["cp-01"],
+                "id": "cp-02",
+            },
+        ]
+    }
+    assert "scripts/validate-checkpoint-plan.py" in orchestrator
+    assert "Never substitute a same-named script from the target repository" in orchestrator
+    assert "before creating any child" in orchestrator
+    assert "--stage <validated stage> --status <validated status>" in orchestrator
+    assert "Depends on: <comma-separated IDs | none>" in orchestrator
+
+    malformed_cases = (
+        ("zero entries", [], "at least one checkpoint"),
+        ("missing stage", [{**plan[0], "stage": None}], "stage must be a positive integer"),
+        (
+            "missing dependency field",
+            [{key: value for key, value in plan[0].items() if key != "depends_on"}],
+            "missing fields: depends_on",
+        ),
+        (
+            "unknown dependency",
+            [plan[0], {**plan[1], "depends_on": ["cp-99"]}],
+            "unknown checkpoint: cp-99",
+        ),
+        (
+            "self dependency",
+            [{**plan[0], "depends_on": ["cp-01"]}, plan[1]],
+            "checkpoint cannot depend on itself",
+        ),
+        (
+            "same-stage dependency",
+            [plan[0], {**plan[1], "stage": 1, "depends_on": ["cp-01"]}],
+            "Stage 1 depends_on must be empty",
+        ),
+        (
+            "missing later dependency",
+            [plan[0], {**plan[1], "depends_on": []}],
+            "later-stage checkpoint requires depends_on",
+        ),
+        (
+            "skipped dependency stage",
+            [plan[0], {**plan[1], "stage": 3}],
+            "stage must be one greater than its latest dependency stage",
+        ),
+    )
+    for name, malformed, expected_error in malformed_cases:
+        rejected = run_checkpoint_plan_validator(malformed)
+        assert rejected.returncode != 0, f"{name} graph was accepted"
+        assert expected_error in rejected.stderr, (name, rejected.stderr)
+    print(
+        "PASS: checkpoint graph cp-01 --stage 1 --status todo; "
+        "cp-02 depends_on=cp-01 --stage 2 --status backlog"
+    )
+    print("PASS: rejected malformed checkpoint graphs: " + ", ".join(case[0] for case in malformed_cases))
 
 
 def test_monitoring_and_recovery_contract() -> None:
@@ -163,6 +272,7 @@ def main() -> None:
         test_final_result_schema_and_order,
         test_specialized_close_order,
         test_native_stage_contract,
+        test_checkpoint_plan_graph_contract,
         test_monitoring_and_recovery_contract,
         test_recursive_descendant_cancellation,
     )

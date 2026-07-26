@@ -13,16 +13,16 @@ This repo is being prepared for public release. Tracked files use neutral logica
 | `AGENTS.md` + `CLAUDE.md` | Byte-identical company operating system for any model editing the repository | Repository instructions |
 | `workspace-context.md` | Company constitution, applies to every Multica agent | `workspace.context` field |
 | `agents/<role>/personality.md` | Agent persona in 4 sections: Identity / Personal Goal / Touchstone / Constraints. Narrative for the first three; imperative bullets for Constraints | `agent.instructions` field |
-| `agents/<role>/skill.md` | Agent operational rules — imperative, written in harness-template style. Self-contained per agent (no cross-references) | One Multica skill, mounted on the agent(s) for that profession |
+| `agents/<role>/skill.md` + optional `agents/<role>/files/` | Agent operational rules plus executable/supporting files. Self-contained per agent (no cross-profession references) | One Multica skill bundle, mounted on the agent(s) for that profession |
 | `templates/*.md` | Output templates. Team-specific content (roster, routing preamble) is canonical here; only the generic section skeleton mirrors `stone16/harness-template`. Not synced to Multica — agents inline them in their own `skill.md` | — |
-| `scripts/sync-multica.sh` | Bridge from this repo to the Multica server (Multica has no git-sync). See "Syncing to Multica" | `multica skill update` / `multica agent update` |
+| `scripts/sync-multica.sh` | Bridge from this repo to the Multica server (Multica has no git-sync). See "Syncing to Multica" | `multica skill update` / `multica skill files upsert` / `multica agent update` |
 | `.agents/skills/sync-multica/` | Repo-local operating procedure for planning, applying, and proving a Multica sync without committing operational identity | Codex repo skill |
 | `deployments/agents.json` | Neutral logical instances, profession, runtime provider, and model intent; never personal names or UUIDs | Existing/creatable Multica agents |
 | `squads/*/squad.json` + `instructions.md` | Persistent Squad topology and operating contracts | Multica Squads and membership |
 | `scripts/sync-topology.py` | Non-destructive topology plan/apply/verify reconciler | Agents, runtimes/models, Squads, memberships |
 | `.github/workflows/pr-sweep.yml` + `.github/scripts/pr-sweep.sh` + `tests/pr-sweep.test.sh` | Automated PR review chain. See "PR-Sweep Automation" | One Multica review issue per PR |
 
-Each profession is two files. No shared skills, no cross-file references — every rule an agent needs is duplicated into that agent's `skill.md`. Duplication is the price of self-containment; we accept it.
+Each profession owns its `personality.md`, `skill.md`, and any supporting files under `agents/<role>/files/`. No shared skills or cross-profession references: every rule and executable an agent needs belongs to that profession's skill bundle. Duplication is the price of self-containment; we accept it.
 
 ## Roster
 
