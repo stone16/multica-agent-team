@@ -81,6 +81,8 @@ A PR description that does not contain validation evidence (screenshots for fron
 
 Assign a complex or multi-role goal to one exact owning Squad by UUID; do not have an external caller fan it out to several agents. A direct-agent path is allowed only when the work is trivial, single-owner, low-risk, has no cross-profession dependency, and needs no independent gate. Use `templates/squad-issue.md` for the Issue body.
 
+**PR-sweep compatibility exception.** The checked-in PR-sweep automation may reuse one dedicated, serialized review issue and assign it directly, one lane at a time, to the non-author Engineer, Evaluator, and Orchestrator. This exception exists only because `.github/scripts/pr-sweep.sh` deterministically preserves one issue identity, review-lane order, immutable head SHA, and Orchestrator-routed rework; it is not a general external-caller bypass. No other complex or multi-role flow may fan work out through direct assignment.
+
 The Orchestrator is the leader of each baseline Squad. Assigning an issue to a Squad tasks its leader; the Squad leader plans, then dispatches each step in a delegation comment that @-mentions the executing member(s). Every delegation comment inlines a Definition of Done block:
 
 ```yaml
@@ -102,7 +104,7 @@ Verification levels:
 
 The executing agent's delivery comment MUST address each `dod.evidence` item with actual evidence, item by item. When `verification: evaluator`, the Orchestrator (on re-trigger) dispatches the Evaluator to independently verify before closing the step. When `verification: human`, the Squad leader asks the human and does not proceed until answered.
 
-No provider fallback is live merely because a tracked field or prose names one. Use a fallback only after that identity is deployed, belongs to each affected Squad, and passes a fresh topology verify. Until then, reruns stay with the current leader and sustained entry failures escalate with evidence.
+No provider fallback is live merely because a tracked field or prose names one. A fallback is eligible only when it is a separate Orchestrator identity, deployed and added to every affected Squad, and a fresh topology verify proves that exact topology. Until then, reruns stay with the current leader and sustained entry failures escalate with evidence.
 
 ## Native Stages and Recovery
 
@@ -110,7 +112,7 @@ Use staged child issues for dependencies, independent acceptance, retry/cancel b
 
 Monitor with `issue get` for parent state, `issue children` for the work graph, `issue runs` for current and historical tasks, `issue run-messages` for event freshness, `issue metadata list` for the deterministic result index, and comments for evidence and steering. Stalled means no new event for the caller-configured freshness window, not merely a long total runtime. Recovery preserves completed evidence and re-dispatches only the missing artifact or verification lane.
 
-Cancellation is task-first: enumerate active tasks, cancel each with `issue cancel-task`, confirm no active rows remain, then set the parent and relevant children to `cancelled`. Status changes alone do not interrupt tasks.
+Cancellation is task-first across the complete descendant issue graph: recursively discover every child and descendant, cancel every active task, re-discover the graph and confirm no active rows remain, then set descendants deepest-first and the parent last to `cancelled`. Status changes alone do not interrupt tasks.
 
 ## Parent Result Contract
 

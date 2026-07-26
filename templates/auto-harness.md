@@ -190,7 +190,7 @@ The **CEO** creates the child issue parked in the later stage, then promotes it
 to `todo` after the checkpoint barrier wake and dispatches it with an inline
 `dod:` block (`outcome` / `evidence` / `verification` / `max_rounds`):
 
-```
+```bash
 multica issue create \
   --title "[harness:e2e] End-to-end verification for <parent title>" \
   --description-stdin \
@@ -224,7 +224,7 @@ the `harness-engineering-skills` repo** (`gh issue create -R stone16/harness-eng
 write the retro markdown to `harness-engineering-skills/.harness/retro/<date>-<task-id>.md`
 per existing convention there.
 
-Set parent status `in_review`. The CEO then runs its Retro close-out step: after the retro delivery passes the DoD check, the CEO closes the parent (`done`). Stop.
+Keep the parent in `in_review`; do not change status here. The CEO then runs its Retro close-out step: after the retro delivery passes the DoD check, the CEO runs the Orchestrator skill's Deterministic Parent Close Sequence (correlation marker lookup/result comment → verified metadata → Squad activity → status). No auto-harness path changes the parent status directly. Stop.
 
 ### Label bootstrap (one-time per workspace)
 

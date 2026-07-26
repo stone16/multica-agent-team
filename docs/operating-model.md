@@ -54,6 +54,8 @@ These are long-lived routing definitions, not permanent full-roster meetings or 
 
 Keep a direct-agent fast path only for work that is trivial, single-owner, low-risk, has no cross-profession dependency, and needs no independent gate. If any condition is false, the external caller assigns the owning Squad and lets its leader compose the lanes; it does not fan one goal out to several individual agents.
 
+The checked-in PR-sweep is one narrow compatibility exception: it reuses one dedicated, serialized review issue and assigns that issue directly, one lane at a time, to the non-author Engineer, Evaluator, and Orchestrator. `.github/scripts/pr-sweep.sh` preserves the issue identity, ordered lanes, immutable head SHA, and Orchestrator-routed rework. This is not a reusable exception for other external callers or multi-role workflows.
+
 Assigning an Issue to a Squad tasks its Orchestrator. Everything after that is driven by Multica's native re-trigger: a member comment containing no mentions returns control to the current leader. No polling.
 
 1. **Issue assigned to Squad** → Orchestrator reads the Issue, injected Squad instructions and roster, posts a plan, then ONE DoD-bearing delegation comment.
@@ -65,7 +67,7 @@ Assigning an Issue to a Squad tasks its Orchestrator. Everything after that is d
 
 The currently deployed contract has no assumed fallback identity. `issue rerun` targets the issue's current assignment. A transient entry failure may rerun the current Squad leader; a sustained provider/runtime/auth/quota failure is escalated to the human with its run and system-comment evidence.
 
-A fallback becomes routable only after a separate Orchestrator identity is deployed, added to every affected Squad, and proved through a fresh topology verify. A repository field or prose claim alone is not deployment evidence. Automatic provider rerouting remains out of scope.
+A fallback is eligible only when it is a separate Orchestrator identity, deployed and added to every affected Squad, and a fresh topology verify proves that exact topology. A repository field or prose claim alone is not deployment evidence. Automatic provider rerouting remains out of scope.
 
 ### Native staged child work
 
@@ -100,7 +102,7 @@ The close sequence is fixed: post the comment, write and read back all five meta
 
 Classify a task as stalled only when no new run-message event arrives during the caller-configured freshness window; total elapsed runtime alone is insufficient. Preserve existing runs, messages, and artifacts, then re-dispatch only the missing artifact or verification lane.
 
-Cancellation is task-first: enumerate active task IDs, cancel every active task with `issue cancel-task`, re-read runs until none remain active, then set the parent and relevant children to `cancelled`. An issue status change records business state but does not interrupt active execution.
+Cancellation is task-first across the complete descendant issue graph: recursively call `issue children` for the parent and every discovered child, enumerate and cancel every active task, re-discover the graph and re-read runs until none remain active, then set descendants deepest-first and the parent last to `cancelled`. An issue status change records business state but does not interrupt active execution.
 
 The stable state machine lives in `agents/orchestrator/skill.md`; each Squad's workflow contract lives in its own instructions. Discussions still run as `discussion`-label Issues, not chat sessions.
 

@@ -71,7 +71,8 @@ scripts/sync-multica.sh
 tests/sync-topology.test.py
 tests/sync-multica.test.sh
 tests/pr-sweep.test.sh
-tests/squad-runtime-contract.test.py
+python3 tests/squad-runtime-contract.test.py
+python3 tests/readme-quickstart.test.py
 ```
 
 同步脚本默认是 dry-run。真正应用变更需要满足仓库规定的 clean `main` 安全条件，并使用本地环境中的认证信息；操作 UUID、mention 链接、token 和私有环境值不得提交到仓库。

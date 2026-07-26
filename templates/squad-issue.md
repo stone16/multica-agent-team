@@ -62,4 +62,4 @@ Metadata is an index only. The long result remains in the pointed-to comment; `r
 
 ## Entry Failure and Fallback
 
-No fallback is assumed. A transient failure may rerun the current Squad assignment. Route to a fallback only when that identity is deployed, belongs to the Squad, and passes a fresh topology verify; otherwise escalate sustained provider/runtime/auth/quota failure with evidence.
+No fallback is assumed. A fallback is eligible only when it is a separate Orchestrator identity, deployed and added to every affected Squad, and a fresh topology verify proves that exact topology. A transient failure may rerun the current Squad assignment; otherwise escalate sustained provider/runtime/auth/quota failure with evidence.

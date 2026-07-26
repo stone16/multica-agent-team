@@ -98,7 +98,8 @@ scripts/sync-multica.sh
 tests/sync-topology.test.py
 tests/sync-multica.test.sh
 tests/pr-sweep.test.sh
-tests/squad-runtime-contract.test.py
+python3 tests/squad-runtime-contract.test.py
+python3 tests/readme-quickstart.test.py
 ```
 
 The sync scripts are intentionally dry-run by default. Applying changes requires the repository's clean-`main` safety contract and ambient authentication; operational UUIDs, mention links, tokens, and private environment values must not be committed.

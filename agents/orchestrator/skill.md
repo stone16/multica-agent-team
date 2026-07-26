@@ -150,12 +150,12 @@ Required metadata schema:
 
 Required order:
 
-1. Post one consolidated result comment on the parent issue using `multica issue comment add <parent-issue-id> --parent <trigger-comment-id> --content-file <file> --output json`; capture its returned UUID. A comment-triggered run keeps its trigger comment as `--parent`; the metadata pointer makes that threaded comment deterministic to retrieve. The comment states outcome, evidence/artifact links, deviations, rollout state, rollback, residual risks, and next owner. Do not post another competing “final” comment.
+1. Post or recover one consolidated result comment on the parent issue. Derive `sha256:<correlation-hash>` from the caller-provided `correlation_id` and include exactly one inert marker as the final line of the result body: `<!-- squad-result: sha256:<correlation-hash> -->`. Never place the raw correlation value in this marker. Before the initial write and before every retry, search the trigger thread with `multica issue comment list <parent-issue-id> --thread <trigger-comment-id> --full --output json` for that exact marker. One match means the authoritative comment already exists: reuse that comment UUID and do not post. Zero matches means post once with `multica issue comment add <parent-issue-id> --parent <trigger-comment-id> --content-file <file> --output json` and capture its UUID. If the response is lost or ambiguous, perform the exact marker lookup before retrying. More than one exact marker match is an invariant violation: stop, preserve both IDs, and escalate without changing metadata or status. The comment states outcome, evidence/artifact links, deviations, rollout state, rollback, residual risks, and next owner.
 2. Write and verify all five metadata keys with `multica issue metadata set`, using `--type string` for IDs/verdict/owner/correlation and `--type bool` for evidence completeness; then read them back with `multica issue metadata list <parent-id> --output json`. If any key is absent, mistyped, or the correlation value differs, do not change status.
 3. Record `multica squad activity` after metadata verification, using `multica squad activity <parent-id> <action|no_action|failed> --reason <concise-reason>`. This timeline record summarizes the routing decision; it does not duplicate the result.
 4. Change the parent status only after steps 1–3 succeed. Use the human/terminal state required by the issue contract: typically `in_review` for a delivered or inconclusive artifact awaiting caller acceptance, `blocked` for blocked/escalated work awaiting a decision, or `done` only when the contract explicitly authorizes terminal closure without another gate.
 
-If metadata or activity recording fails after the comment is posted, preserve that comment, report the exact failed operation, and retry only the missing close step. Do not post a second result payload.
+If metadata or activity recording fails after the comment is posted, preserve that comment, recover it by its exact correlation-hash marker, and retry only the missing close step. Do not post a second result payload.
 
 ## Monitoring, Steering, and Recovery
 
@@ -178,12 +178,14 @@ Record caller and runtime Multica CLI versions before automating. Use only field
 
 ## Task-First Cancellation
 
-Changing an issue to `cancelled` or `blocked` does not interrupt active tasks. Full cancellation is ordered:
+Changing an issue to `cancelled` or `blocked` does not interrupt active tasks. Full cancellation is ordered across a stable snapshot of the complete descendant issue graph:
 
-1. Enumerate active task IDs with `multica issue runs <issue-id> --output json` for the parent and relevant children.
-2. Cancel each active task with `multica issue cancel-task <task-id> --issue <issue-id> --output json`.
-3. Re-run `multica issue runs` and confirm no queued, dispatched, running, waiting, or deferred task remains active.
-4. Only then set the parent and relevant children to `cancelled` so the issue graph records the business decision.
+1. Discover the complete descendant issue graph recursively: start with the parent, run `multica issue children <issue-id> --output json` for it, then repeat for every discovered child until no unseen issue remains. Record each issue ID and depth.
+2. Enumerate active task IDs with `multica issue runs <issue-id> --output json` for every issue in that graph.
+3. Cancel each active task with `multica issue cancel-task <task-id> --issue <issue-id> --output json`.
+4. Re-run `multica issue runs` for every issue and confirm no queued, dispatched, running, waiting, or deferred task remains active.
+5. Re-run descendant discovery recursively. If any new issue appeared, add its entire subtree and repeat steps 2–5. Do not change statuses until the graph is stable and task-free.
+6. Only then set every issue in the graph to `cancelled`, deepest descendants first and the parent last, so no terminal-looking ancestor hides active descendant work.
 
 Post the cancellation reason as audit evidence. If any cancel operation fails, keep the issue status truthful, name the still-active task, and escalate; never hide execution behind a terminal-looking issue status.
 
@@ -222,9 +224,11 @@ Re-triggered by a delivery comment containing `[auto-harness: checkpoint-plan]` 
 
 5. Then normal states apply: child deliveries re-trigger you through States 2–3, and native barrier closure wakes the parent assignee once for that stage.
 6. **E2E hand-off — use the native barrier transition.** A checkpoint child is accepted only when its status is `done` and, where its DoD specified `verification: evaluator`, the Evaluator verdict is PASS; `in_review` is not accepted. On the checkpoint stage's native barrier wake, read `issue children`, verify those acceptance conditions, promote any already-created E2E backlog child or post the bounded parent delegation that requests the `[auto-harness: e2e-plan]`. Do not maintain a parallel all-children-done checklist.
-7. **Retro close-out — also yours, same reasoning.** When the E2E child reaches `done` with its required verification PASS, post a delegation comment on the PARENT issue @-mentioning the proposing Engineer, with a DoD whose `outcome` is the `[auto-harness: retro]` delivery on the parent (retro format lives in the Engineer's harness procedure). After the retro delivery passes your DoD check, close the parent (`done`). Without this dispatch the parent stalls in `in_review` indefinitely — the E2E child's delivery re-triggers you on the child, never the Engineer on the parent.
+7. **Retro close-out — also yours, same reasoning.** When the E2E child reaches `done` with its required verification PASS, post a delegation comment on the PARENT issue @-mentioning the proposing Engineer, with a DoD whose `outcome` is the `[auto-harness: retro]` delivery on the parent (retro format lives in the Engineer's harness procedure). After the retro delivery passes your DoD check, run the Deterministic Parent Close Sequence—correlation marker lookup/result comment, verified metadata, Squad activity, then status. No specialized path closes the parent directly. Without this dispatch the parent stalls in `in_review` indefinitely—the E2E child's delivery re-triggers you on the child, never the Engineer on the parent.
 
 ## PR Review Adjudication (pr-sweep)
+
+**Compatibility boundary.** PR-sweep is the only complex-flow exception to Squad-first entry: its one dedicated review issue is serialized through the non-author Engineer, Evaluator, and Orchestrator for one immutable head SHA. Direct assignments and author rework delegation below are legal only inside that script-owned issue. They do not create a general direct-agent fast path.
 
 The pr-sweep loop runs two review lanes per PR head SHA — a peer Engineer lane writing `<!-- engineer-reviewed: <head-sha> verdict: <approve|request-changes|block> -->` and an adversarial Evaluator lane writing `<!-- evaluator-reviewed: <head-sha> verdict: <approve|request-changes|block> -->`. The script never @-mentions PR authors — leader-only routing means EVERY non-approve reconciled outcome (agreed `request-changes`, agreed `block`, or lane disagreement) lands on you via `CEO_MENTION` with one of two action kinds:
 

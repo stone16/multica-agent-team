@@ -64,7 +64,9 @@ An Issue has exactly one owning Squad at a time, and its body uses `templates/sq
 
 A direct-agent fast path is allowed only when work is genuinely trivial, single-owner, low-risk, has no cross-profession dependency, and needs no independent gate. The first unmet condition requires Squad assignment. Do not fan one complex goal out to several agents from an external caller; assign the owning Squad and let its leader compose the lanes.
 
-No fallback identity is live merely because a repository field names one. Until a separate Orchestrator identity is deployed, added to every affected Squad, and proved by a fresh topology verify, reruns stay with the current Squad leader and sustained provider/runtime entry failures escalate to the human with evidence. Never advertise or route to an unverified fallback.
+**PR-sweep compatibility exception.** The checked-in PR-sweep automation may reuse one dedicated, serialized review issue and assign it directly, one lane at a time, to the non-author Engineer, Evaluator, and Orchestrator. This exception exists only because `.github/scripts/pr-sweep.sh` deterministically preserves one issue identity, review-lane order, immutable head SHA, and Orchestrator-routed rework; it is not a general external-caller bypass. No other complex or multi-role flow may fan work out through direct assignment.
+
+No fallback identity is live merely because a repository field names one. A fallback is eligible only when it is a separate Orchestrator identity, deployed and added to every affected Squad, and a fresh topology verify proves that exact topology. Until then, reruns stay with the current Squad leader and sustained provider/runtime entry failures escalate to the human with evidence. Never advertise or route to an unverified fallback.
 
 Keep one accountable initiative owner and one Project ledger across Squad transitions. If phase handoffs become the dominant source of rework for a mature product, create a domain/value-stream Squad that owns that product across its lifecycle while retaining the functional Squads as specialist capability pools.
 
@@ -133,7 +135,7 @@ The authoritative payload is one consolidated human-readable parent comment. Iss
 
 Observe parent business state with `issue get`, the work graph with `issue children`, current and historical execution with `issue runs`, event freshness with `issue run-messages`, result readiness with `issue metadata list`, and evidence/steering with comments. A task is stalled only when no new run-message event arrives for the caller-configured freshness window; total elapsed time alone is not evidence of a stall. Preserve existing evidence and re-dispatch only the missing artifact or verification lane.
 
-Cancellation is task-first: enumerate active task IDs, cancel every active task, confirm no task remains active, then set the parent and relevant children to `cancelled`. Changing issue status alone does not interrupt running or queued work.
+Cancellation is task-first across the complete descendant issue graph: recursively discover every child and descendant, enumerate and cancel every active task, re-discover the graph and confirm no active task remains, then set descendants deepest-first and the parent last to `cancelled`. Changing issue status alone does not interrupt running or queued work.
 
 ## Context and Memory Boundaries
 
