@@ -40,16 +40,16 @@
     "logical_id": "evaluator-a",
     "desired_name": "Evaluator-A",
     "profession": "evaluator",
-    "runtime_provider": "grok",
-    "model": "",
+    "runtime_provider": "opencode",
+    "model": "qwen3.8-max-preview",
     "create_if_missing": true
   },
   {
     "logical_id": "evaluator-b",
     "desired_name": "Evaluator-B",
     "profession": "evaluator",
-    "runtime_provider": "grok",
-    "model": "",
+    "runtime_provider": "opencode",
+    "model": "qwen3.8-max-preview",
     "create_if_missing": true
   },
   {
