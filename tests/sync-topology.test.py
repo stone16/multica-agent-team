@@ -48,8 +48,8 @@ def make_fixture(state: str) -> Path:
                     "logical_id": "evaluator-a",
                     "desired_name": "Evaluator-A",
                     "profession": "evaluator",
-                    "runtime_provider": "grok",
-                    "model": "",
+                    "runtime_provider": "opencode",
+                    "model": "qwen3.8-max-preview",
                     "create_if_missing": True,
                 },
             ]
@@ -87,7 +87,7 @@ if args[:2] == ["agent", "list"]:
 elif args[:2] == ["runtime", "list"]:
     print(json.dumps([
         {"id":"r-claude","name":"Claude","provider":"claude","status":"online"},
-        {"id":"r-grok","name":"Grok","provider":"grok","status":"online"}
+        {"id":"r-opencode","name":"OpenCode","provider":"opencode","status":"online"}
     ]))
 elif args[:2] == ["skill", "list"]:
     print(json.dumps([
@@ -166,6 +166,19 @@ def run_fixture(tmp: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_evaluators_use_qwen_preview() -> None:
+    deployments = json.loads((ROOT / "deployments/agents.json").read_text())
+    evaluators = {
+        item["logical_id"]: (item["runtime_provider"], item["model"])
+        for item in deployments
+        if item["profession"] == "evaluator"
+    }
+    assert evaluators == {
+        "evaluator-a": ("opencode", "qwen3.8-max-preview"),
+        "evaluator-b": ("opencode", "qwen3.8-max-preview"),
+    }
+
+
 def test_plan_is_read_only() -> None:
     tmp = make_fixture("drift")
     result = run_fixture(tmp)
@@ -196,7 +209,7 @@ def test_apply_upgrades_legacy_claude_model() -> None:
                 "scenario": "matched",
                 "agents": [
                     {"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-4-8"},
-                    {"id":"a-eval","name":"Legacy Evaluator","runtime_id":"r-grok","model":""},
+                    {"id":"a-eval","name":"Legacy Evaluator","runtime_id":"r-opencode","model":"qwen3.8-max-preview"},
                 ],
                 "squads": [{"id":"s-discovery","name":"Discovery","description":"Discover","leader_id":"a-lead","instructions":"Discovery instructions\n"}],
                 "calls": [],
@@ -237,8 +250,15 @@ def test_apply_keeps_identity_across_rename_and_runtime_change() -> None:
     state = json.loads((tmp / "state.json").read_text())
     evaluator = next(agent for agent in state["agents"] if agent["id"] == "a-eval")
     assert evaluator["name"] == "Evaluator-A"
-    assert evaluator["runtime_id"] == "r-grok"
-    assert evaluator["model"] == ""
+    assert evaluator["runtime_id"] == "r-opencode"
+    assert evaluator["model"] == "qwen3.8-max-preview"
+    assert any(
+        call[:3] == ["agent", "update", "a-eval"]
+        and call[call.index("--runtime-id") + 1] == "r-opencode"
+        and call[call.index("--model") + 1] == "qwen3.8-max-preview"
+        for call in state["calls"]
+        if "--runtime-id" in call and "--model" in call
+    )
 
 
 def test_verify_rejects_drift_and_accepts_convergence() -> None:
@@ -255,7 +275,7 @@ def test_verify_rejects_drift_and_accepts_convergence() -> None:
                 "scenario": "matched",
                 "agents": [
                     {"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-5"},
-                    {"id":"a-eval","name":"Evaluator-A","runtime_id":"r-grok","model":""},
+                    {"id":"a-eval","name":"Evaluator-A","runtime_id":"r-opencode","model":"qwen3.8-max-preview"},
                 ],
                 "squads": [{"id":"s-discovery","name":"Discovery","description":"Discover","leader_id":"a-lead","instructions":"Discovery instructions\n"}],
                 "calls": [],
@@ -276,7 +296,7 @@ def test_extra_members_fail_closed() -> None:
                 "scenario": "extra-member",
                 "agents": [
                     {"id":"a-lead","name":"Existing Orchestrator","runtime_id":"r-claude","model":"claude-opus-5"},
-                    {"id":"a-eval","name":"Evaluator-A","runtime_id":"r-grok","model":""},
+                    {"id":"a-eval","name":"Evaluator-A","runtime_id":"r-opencode","model":"qwen3.8-max-preview"},
                 ],
                 "squads": [{"id":"s-discovery","name":"Discovery","description":"Discover","leader_id":"a-lead","instructions":"Discovery instructions\n"}],
                 "calls": [],
@@ -289,6 +309,7 @@ def test_extra_members_fail_closed() -> None:
 
 
 def main() -> None:
+    test_evaluators_use_qwen_preview()
     test_plan_is_read_only()
     test_apply_creates_missing_instance_and_squad()
     test_apply_upgrades_legacy_claude_model()

@@ -35,7 +35,7 @@ Seven professions, flat — vertical tiers are abolished. One directory per prof
 | 3 | Designer | `agents/designer/` | Claude / Opus 5 | User journey, UX/UI, prototype and design review |
 | 4 | Engineer | `agents/engineer/` | Two Codex instances, both `gpt-5.6-sol` | Implementation and non-author peer review |
 | 5 | GTM | `agents/gtm/` | Grok runtime default | Positioning, launch, channel selection, growth experiments, market feedback |
-| 6 | Evaluator | `agents/evaluator/` | Two Grok runtime-default instances | Independent DoD, behavior, security and performance verification |
+| 6 | Evaluator | `agents/evaluator/` | Two OpenCode instances, both `qwen3.8-max-preview` | Independent DoD, behavior, security and performance verification |
 | 7 | Researcher | `agents/researcher/` | Claude / Opus 5 | Primary-source-grounded evidence and uncertainty reduction |
 
 The Engineer instances share one profile, as do the two Evaluators. Instances provide capacity or independent judgment; they do not create Senior/Junior tiers. Provider/model intent lives in `deployments/agents.json`; existing personal display-name mappings are supplied only for the sync process.

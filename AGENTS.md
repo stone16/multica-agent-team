@@ -41,7 +41,7 @@ The company keeps seven reusable Profession Profiles:
 | Designer | Define journeys, interactions, prototypes, and experience-quality decisions | Claude runtime |
 | Engineer | Design and implement correct, observable, reversible systems | Two Codex instances: Engineer-A and Engineer-B; both `gpt-5.6-sol` |
 | GTM | Positioning, launch, channel experiments, growth, and market feedback | Grok runtime default |
-| Evaluator | Independent behavioral, security, performance, and DoD verification | Two Grok runtime-default instances: Evaluator-A and Evaluator-B |
+| Evaluator | Independent behavioral, security, performance, and DoD verification | Two OpenCode instances: Evaluator-A and Evaluator-B; both `qwen3.8-max-preview` |
 | Researcher | Primary-source evidence, market/user/technical research, and uncertainty reduction | Claude runtime |
 
 Two instances sharing a profile are independent execution lanes, not new professions. Add a new Profession Profile only when a repeated responsibility has a materially different evidence contract, tool or permission boundary, or decision authority.
