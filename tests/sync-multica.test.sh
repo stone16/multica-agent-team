@@ -14,14 +14,32 @@ assert_contains() {
   grep -Fq -- "$needle" "$file" || fail "$file does not contain: $needle"
 }
 
+assert_no_contract_writes() {
+  local file="$1"
+  ! grep -Fq 'workspace update' "$file" || fail "failure path allowed a workspace write"
+  ! grep -Fq 'skill update' "$file" || fail "failure path allowed a skill-body write"
+  ! grep -Fq 'skill create' "$file" || fail "failure path allowed a skill-body create"
+  ! grep -Fq 'agent update' "$file" || fail "failure path allowed an agent write"
+  ! grep -Fq 'agent skills add' "$file" || fail "failure path allowed an attachment write"
+}
+
+assert_line_before() {
+  local file="$1" earlier="$2" later="$3" earlier_n later_n
+  earlier_n="$(grep -nF -- "$earlier" "$file" | head -1 | cut -d: -f1)"
+  later_n="$(grep -nF -- "$later" "$file" | head -1 | cut -d: -f1)"
+  [[ -n "$earlier_n" && -n "$later_n" ]] || fail "missing ordering anchor"
+  (( earlier_n < later_n )) || fail "expected '$earlier' before '$later'"
+}
+
 make_fixture() {
   local scenario="$1" tmp
   tmp="$(mktemp -d)"
-  mkdir -p "$tmp/repo/scripts" "$tmp/repo/agents/orchestrator" "$tmp/bin" "$tmp/state"
+  mkdir -p "$tmp/repo/scripts" "$tmp/repo/agents/orchestrator/files/scripts" "$tmp/bin" "$tmp/state"
   cp "$ROOT/scripts/sync-multica.sh" "$tmp/repo/scripts/"
   printf '%s\n' 'desired context' > "$tmp/repo/workspace-context.md"
   printf '%s\n' 'desired personality' > "$tmp/repo/agents/orchestrator/personality.md"
   printf '%s\n' 'desired skill' > "$tmp/repo/agents/orchestrator/skill.md"
+  printf '%s\n' 'desired validator' > "$tmp/repo/agents/orchestrator/files/scripts/validate-checkpoint-plan.py"
   printf '%s' "$scenario" > "$tmp/state/scenario"
 
   cat > "$tmp/bin/multica" << 'STUB'
@@ -60,6 +78,26 @@ case "$1 $2" in
       content='"remote skill"'
     fi
     printf '{"id":"skill-orchestrator","name":"Orchestrator Skill","content":%s}\n' "$content"
+    ;;
+  "skill files")
+    if [[ "$3" == "list" ]]; then
+      if [[ "$scenario" == "unmanaged-file" ]]; then
+        printf '[{"id":"file-extra","skill_id":"%s","path":"extra.sh","content":"extra"}]\n' "$4"
+      elif [[ "$scenario" == "matched" || "$scenario" == "retry" ]]; then
+        content="$(json_string_from_file "$SYNC_TEST_ROOT/agents/orchestrator/files/scripts/validate-checkpoint-plan.py")"
+        printf '[{"id":"file-validator","skill_id":"%s","path":"scripts/validate-checkpoint-plan.py","content":%s}]\n' "$4" "$content"
+      else
+        printf '[]\n'
+      fi
+    elif [[ "$3" == "upsert" ]]; then
+      if [[ "$scenario" == "upsert-failure" ]]; then
+        printf 'simulated supporting-file upsert failure\n' >&2
+        exit 1
+      fi
+      :
+    else
+      exit 2
+    fi
     ;;
   "skill update")
     ;;
@@ -141,11 +179,18 @@ test_dry_run_plans_all_managed_resources() {
   run_fixture "$tmp" > "$tmp/stdout" 2> "$tmp/stderr"
   assert_contains "$tmp/stderr" $'workspace\tcontext\tTest Workspace\twould update'
   assert_contains "$tmp/stderr" $'orchestrator\tskill\tOrchestrator Skill\twould update'
+  assert_contains "$tmp/stderr" $'orchestrator\tskill-file\tscripts/validate-checkpoint-plan.py\twould create'
   assert_contains "$tmp/stderr" $'orchestrator\tagent\tOrchestrator\twould update'
   assert_contains "$tmp/stderr" $'orchestrator\tattachment\tOrchestrator\twould attach'
   ! grep -Fq 'workspace update' "$tmp/state/calls.log" || fail "dry-run performed a workspace write"
   ! grep -Fq 'skill update' "$tmp/state/calls.log" || fail "dry-run performed a skill write"
+  ! grep -Fq 'skill files upsert' "$tmp/state/calls.log" || fail "dry-run performed a skill-file write"
   ! grep -Fq 'agent update' "$tmp/state/calls.log" || fail "dry-run performed an agent write"
+
+  tmp="$(make_fixture create)"
+  run_fixture "$tmp" > "$tmp/stdout" 2> "$tmp/stderr"
+  assert_contains "$tmp/stderr" $'orchestrator\tskill-file\tscripts/validate-checkpoint-plan.py\twould create after skill'
+  ! grep -Fq 'skill files upsert' "$tmp/state/calls.log" || fail "dry-run missing-skill path performed a skill-file write"
 }
 
 test_apply_writes_context_content_instructions_and_attachment() {
@@ -154,8 +199,11 @@ test_apply_writes_context_content_instructions_and_attachment() {
   run_fixture "$tmp" --apply > "$tmp/stdout" 2> "$tmp/stderr"
   assert_contains "$tmp/state/calls.log" 'workspace update workspace-test --context-stdin'
   assert_contains "$tmp/state/calls.log" 'skill update skill-orchestrator --content-file agents/orchestrator/skill.md'
+  assert_contains "$tmp/state/calls.log" 'skill files upsert skill-orchestrator --path scripts/validate-checkpoint-plan.py --content-file agents/orchestrator/files/scripts/validate-checkpoint-plan.py'
   assert_contains "$tmp/state/calls.log" 'agent update agent-orchestrator --instructions desired personality'
   assert_contains "$tmp/state/calls.log" 'agent skills add agent-orchestrator --skill-ids skill-orchestrator'
+  assert_line_before "$tmp/state/calls.log" 'skill files upsert skill-orchestrator' 'workspace update workspace-test'
+  assert_line_before "$tmp/state/calls.log" 'skill files upsert skill-orchestrator' 'skill update skill-orchestrator'
 }
 
 test_verify_passes_only_on_converged_state() {
@@ -163,6 +211,7 @@ test_verify_passes_only_on_converged_state() {
   tmp="$(make_fixture matched)"
   run_fixture "$tmp" --verify > "$tmp/stdout" 2> "$tmp/stderr"
   assert_contains "$tmp/stderr" $'workspace\tcontext\tTest Workspace\tup-to-date'
+  assert_contains "$tmp/stderr" $'orchestrator\tskill-file\tscripts/validate-checkpoint-plan.py\tup-to-date'
   assert_contains "$tmp/stderr" $'orchestrator\tattachment\tOrchestrator\tattached'
 
   tmp="$(make_fixture drift)"
@@ -245,12 +294,44 @@ test_ambiguous_resources_fail_before_apply() {
   ! grep -Fq 'workspace update' "$tmp/state/calls.log" || fail "ambiguous skill allowed a write"
 }
 
-test_created_skill_is_attached_in_same_apply() {
+test_missing_skill_with_supporting_files_fails_before_apply() {
   local tmp
   tmp="$(make_fixture create)"
-  run_fixture "$tmp" --apply > "$tmp/stdout" 2> "$tmp/stderr"
-  assert_contains "$tmp/state/calls.log" 'skill create --name Orchestrator Skill'
-  assert_contains "$tmp/state/calls.log" 'agent skills add agent-orchestrator --skill-ids skill-created'
+  if run_fixture "$tmp" --apply > "$tmp/stdout" 2> "$tmp/stderr"; then
+    fail "apply unexpectedly activated a missing skill before its supporting file existed"
+  fi
+  assert_contains "$tmp/stderr" 'cannot safely create and activate it before those files exist'
+  assert_no_contract_writes "$tmp/state/calls.log"
+}
+
+test_unmanaged_remote_skill_file_fails_closed() {
+  local tmp
+  tmp="$(make_fixture unmanaged-file)"
+  if run_fixture "$tmp" > "$tmp/stdout" 2> "$tmp/stderr"; then
+    fail "unmanaged remote skill file unexpectedly passed"
+  fi
+  assert_contains "$tmp/stderr" "supporting files absent from agents/orchestrator/files"
+  assert_contains "$tmp/stderr" "extra.sh"
+  ! grep -Fq 'skill files upsert' "$tmp/state/calls.log" || fail "unmanaged remote file allowed a skill-file write"
+
+  tmp="$(make_fixture unmanaged-file)"
+  if run_fixture "$tmp" --apply > "$tmp/stdout" 2> "$tmp/stderr"; then
+    fail "apply unexpectedly passed with an unmanaged remote skill file"
+  fi
+  assert_contains "$tmp/stderr" 'No remote writes were attempted'
+  assert_no_contract_writes "$tmp/state/calls.log"
+  ! grep -Fq 'skill files upsert' "$tmp/state/calls.log" || fail "unmanaged apply preflight allowed a skill-file write"
+}
+
+test_supporting_file_failure_blocks_contract_activation() {
+  local tmp
+  tmp="$(make_fixture upsert-failure)"
+  if run_fixture "$tmp" --apply > "$tmp/stdout" 2> "$tmp/stderr"; then
+    fail "apply unexpectedly passed after a supporting-file upsert failure"
+  fi
+  assert_contains "$tmp/state/calls.log" 'skill files upsert skill-orchestrator --path scripts/validate-checkpoint-plan.py'
+  assert_contains "$tmp/stderr" 'supporting-file phase failed before contract activation'
+  assert_no_contract_writes "$tmp/state/calls.log"
 }
 
 test_dry_run_plans_all_managed_resources
@@ -261,5 +342,7 @@ test_apply_preflight_blocks_partial_writes
 test_transient_reads_are_retried
 test_apply_requires_clean_main_at_origin
 test_ambiguous_resources_fail_before_apply
-test_created_skill_is_attached_in_same_apply
+test_missing_skill_with_supporting_files_fails_before_apply
+test_unmanaged_remote_skill_file_fails_closed
+test_supporting_file_failure_blocks_contract_activation
 printf 'PASS: sync-multica desired-state tests\n'

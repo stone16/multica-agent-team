@@ -245,7 +245,7 @@ Performance findings:
 <!-- evaluator-reviewed: deadbeef verdict: request-changes -->
 C
       ;;
-    reviewed-approve-approve-review-issue-exists)
+      reviewed-approve-approve-review-issue-exists|reviewed-approve-approve-result-exists)
       emit stone16 <<'C'
 <!-- multica-pr-review-issue: 11111111-1111-1111-1111-000000000001 -->
 C
@@ -693,6 +693,8 @@ GH
 #!/usr/bin/env bash
 set -euo pipefail
 
+printf '%s\n' "$*" >> "$PR_SWEEP_CAPTURE_DIR/multica-calls.log"
+
 if [[ "$1 $2" == "issue comment" && "${3:-}" == "list" ]]; then
   if [[ "$PR_SWEEP_TEST_SCENARIO" == "unreviewed-review-issue-exists" ]]; then
     printf '[{"content":"<!-- multica-review-requested: deadbeef agent: engineer-a -->"}]\n'
@@ -700,6 +702,8 @@ if [[ "$1 $2" == "issue comment" && "${3:-}" == "list" ]]; then
     printf '[{"content":"<!-- multica-review-dispatched: deadbeef -->"}]\n'
   elif [[ "${PR_SWEEP_EXISTING_ORIGIN_COMMENT:-0}" == "1" ]]; then
     printf '[{"content":"<!-- multica-review-dispatched: deadbeef -->"}]\n'
+  elif [[ "$PR_SWEEP_TEST_SCENARIO" == "reviewed-approve-approve-result-exists" ]]; then
+    printf '[{"id":"existing-result-comment","content":"<!-- squad-result: sha256:403df4aa575893946f54bc117286b54c5c2bfe67255b38843a348e08e76959e3 -->"}]\n'
   else
     printf '[]\n'
   fi
@@ -721,7 +725,19 @@ if [[ "$1 $2" == "issue comment" && "${3:-}" == "add" ]]; then
   printf '%s' "$idx" >"$idx_file"
 
   printf '%s\n' "$*" >"$PR_SWEEP_CAPTURE_DIR/issue-comment-${idx}.args"
-  cat >"$PR_SWEEP_CAPTURE_DIR/issue-comment-${idx}.md"
+  content_file=""
+  for ((i = 1; i <= $#; i++)); do
+    if [[ "${!i}" == "--content-file" ]]; then
+      next=$((i + 1))
+      content_file="${!next}"
+      break
+    fi
+  done
+  if [[ -n "$content_file" ]]; then
+    cp "$content_file" "$PR_SWEEP_CAPTURE_DIR/issue-comment-${idx}.md"
+  else
+    cat >"$PR_SWEEP_CAPTURE_DIR/issue-comment-${idx}.md"
+  fi
   printf '{"id":"issue-comment-%s"}\n' "$idx"
   exit 0
 fi
@@ -742,6 +758,47 @@ if [[ "$1 $2" == "issue update" ]]; then
 
   printf '%s\n' "$*" >"$PR_SWEEP_CAPTURE_DIR/issue-update-${idx}.args"
   printf '{"id":"%s"}\n' "${3:-unknown}"
+  exit 0
+fi
+
+if [[ "$1 $2" == "issue metadata" && "${3:-}" == "set" ]]; then
+  key=""
+  value=""
+  type=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --key) key="$2"; shift 2 ;;
+      --value) value="$2"; shift 2 ;;
+      --type) type="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  printf '%s' "$value" > "$PR_SWEEP_CAPTURE_DIR/metadata-$key.value"
+  printf '%s' "$type" > "$PR_SWEEP_CAPTURE_DIR/metadata-$key.type"
+  printf '{"key":"%s"}\n' "$key"
+  exit 0
+fi
+
+if [[ "$1 $2" == "issue metadata" && "${3:-}" == "list" ]]; then
+  python3 - "$PR_SWEEP_CAPTURE_DIR" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+data = {}
+for path in root.glob("metadata-*.value"):
+    key = path.name[len("metadata-"):-len(".value")]
+    value = path.read_text()
+    type_path = root / f"metadata-{key}.type"
+    if type_path.exists() and type_path.read_text() == "bool":
+        value = value == "true"
+    data[key] = value
+print(json.dumps(data))
+PY
+  exit 0
+fi
+
+if [[ "$1 $2" == "squad activity" ]]; then
+  printf '%s\n' "$*" > "$PR_SWEEP_CAPTURE_DIR/squad-activity.args"
+  printf '{"ok":true}\n'
   exit 0
 fi
 
@@ -1033,10 +1090,30 @@ test_approve_consensus_closes_existing_review_issue_without_ceo() {
   tmp="$(run_sweep_with_stubs reviewed-approve-approve-review-issue-exists)"
 
   assert_file_count "$tmp/captures" 0
-  assert_comment_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-comment-1.md" "PR review accepted after two independent approvals."
+  assert_contains "$tmp/captures/issue-comment-1.md" "<!-- squad-result: sha256:"
+  assert_contains "$tmp/captures/metadata-squad_verdict.value" "delivered"
+  assert_contains "$tmp/captures/metadata-squad_evidence_complete.value" "true"
+  assert_contains "$tmp/captures/squad-activity.args" "squad activity 11111111-1111-1111-1111-000000000001 action"
+  assert_line_before "$tmp/captures/multica-calls.log" "issue comment add" "issue metadata set"
+  assert_line_before "$tmp/captures/multica-calls.log" "issue metadata list" "squad activity"
+  assert_line_before "$tmp/captures/multica-calls.log" "squad activity" "issue update 11111111-1111-1111-1111-000000000001 --status done"
   assert_contains "$tmp/captures/issue-update-1.args" "--status done"
   assert_not_contains "$tmp/captures/issue-update-1.args" "--assignee"
+  assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: approve -->"
+}
+
+test_approve_close_recovers_parent_wide_result_from_prior_trigger() {
+  local tmp
+  tmp="$(run_sweep_with_stubs reviewed-approve-approve-result-exists)"
+
+  assert_comment_count "$tmp/captures" 0
+  assert_update_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/metadata-squad_result_comment_id.value" "existing-result-comment"
+  assert_contains "$tmp/captures/multica-calls.log" "issue comment list 11111111-1111-1111-1111-000000000001 --full --output json"
+  assert_not_contains "$tmp/captures/multica-calls.log" "--thread"
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: approve -->"
 }
 
@@ -1086,7 +1163,7 @@ test_debate_with_ceo_resolution_approve_converges_and_closes_issue() {
   tmp="$(run_sweep_with_stubs debate-ceo-resolved-approve)"
 
   assert_file_count "$tmp/captures" 0
-  assert_comment_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
   assert_pr_comment_count "$tmp/captures" 1
   assert_contains "$tmp/captures/pr-comment.md" "<!-- consensus: deadbeef verdict: approve -->"
   assert_update_count "$tmp/captures" 1
@@ -1589,6 +1666,7 @@ test_close_failure_blocks_terminal_consensus() {
 
   assert_status "$tmp" 0
   [[ ! -f "$tmp/captures/pr-comment.md" ]] || fail "terminal consensus sentinel written despite close failure"
+  assert_comment_count "$tmp/captures" 1
   assert_update_count "$tmp/captures" 0
   assert_contains "$tmp/stderr.log" "close failed"
   assert_contains "$tmp/stderr.log" "retry next sweep"
@@ -1603,7 +1681,9 @@ test_marker_write_failure_retries_then_closes_orphan() {
 
   assert_status "$tmp" 0
   assert_file_count "$tmp/captures" 1
-  assert_comment_count "$tmp/captures" 0
+  assert_comment_count "$tmp/captures" 1
+  assert_contains "$tmp/captures/issue-comment-1.md" "Review tracking aborted because the durable GitHub marker could not be written."
+  assert_contains "$tmp/captures/metadata-squad_verdict.value" "inconclusive"
   assert_contains "$tmp/stderr.log" "marker write attempt 1/3 failed"
   assert_contains "$tmp/stderr.log" "marker write attempt 3/3 failed"
   assert_contains "$tmp/stderr.log" "after 3 attempts"
@@ -1643,6 +1723,7 @@ test_missing_original_author_escalates_to_ceo
 test_unrelated_agent_mentions_do_not_route_rework
 test_prior_prose_sentinels_do_not_inflate_iteration_count
 test_approve_consensus_closes_existing_review_issue_without_ceo
+test_approve_close_recovers_parent_wide_result_from_prior_trigger
 test_debate_routes_to_ceo_in_pr_review_issue
 test_debate_without_resolution_waits_for_ceo
 test_debate_with_ceo_resolution_approve_converges_and_closes_issue

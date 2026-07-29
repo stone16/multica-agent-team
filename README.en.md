@@ -22,7 +22,7 @@
 
 Multica Agent Team is the Git source of truth for a reusable agent company. It separates stable professional capability from deployable agent identities, long-lived Squad routing, and short-lived Issue runs. This public reference project is designed to make multi-agent work understandable, reviewable, and portable across model providers.
 
-The current baseline contains seven Profession Profiles, nine intended Agent Instances, and five persistent functional Squads. A Squad does not activate its entire roster for every task: the Orchestrator selects the smallest sufficient team and gives each activated role a bounded Definition of Done.
+The current baseline contains seven Profession Profiles, nine intended Agent Instances, and five persistent functional Squads. Complex or multi-role work is assigned to one exact owning Squad; a Squad does not activate its entire roster for every task. The Orchestrator selects the smallest sufficient team and gives each activated role a bounded Definition of Done.
 
 ### The core idea: stable contract, changeable deployment
 
@@ -69,10 +69,10 @@ sequenceDiagram
     M-->>O: Mention-free delivery + evidence
     O->>V: Independent or human verification when required
     V-->>O: Verdict / approval / rework
-    O-->>I: Close, hand off, or record residual risk
+    O-->>I: Consolidated result comment + typed metadata index
 ```
 
-Every delegation defines an observable outcome, required evidence, verification level, and a rework cap. This keeps model judgment in ambiguous work while deterministic code handles routing, retries, validation, counting, sorting, and status transitions.
+Every delegation defines an observable outcome, required evidence, verification level, and a rework cap. Dependent work uses native staged child issues; close-out writes one consolidated result comment and a typed metadata pointer before status changes. This keeps model judgment in ambiguous work while deterministic code handles routing, retries, validation, counting, sorting, and status transitions.
 
 ### What is included
 
@@ -82,6 +82,7 @@ Every delegation defines an observable outcome, required evidence, verification 
 - A PR-Sweep workflow with independent review lanes and machine-readable review state.
 - Templates for PRDs, architecture specs, change proposals, evaluations, incidents, feedback, and pull requests.
 - Tests for the synchronization and review-routing behavior.
+- A Squad Issue template covering exact ownership, correlation, staged work, freshness, and deterministic result retrieval.
 
 ### Quick start
 
@@ -97,6 +98,8 @@ scripts/sync-multica.sh
 tests/sync-topology.test.py
 tests/sync-multica.test.sh
 tests/pr-sweep.test.sh
+python3 tests/squad-runtime-contract.test.py
+python3 tests/readme-quickstart.test.py
 ```
 
 The sync scripts are intentionally dry-run by default. Applying changes requires the repository's clean-`main` safety contract and ambient authentication; operational UUIDs, mention links, tokens, and private environment values must not be committed.

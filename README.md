@@ -24,7 +24,7 @@ Multica Agent Team 是一个公开的、可复用的 Agent 公司 Git 事实源�
 - Issue-scoped Run：一次具体任务的目标、上下文、证据和剩余风险。
 - Project ledger：经过审阅后可以长期保留的事实、决策和交付物。
 
-当前基线包含七个 Profession Profile、九个预期 Agent Instance 和五个持久化功能 Squad。每次任务不会默认唤起整个 Squad；Orchestrator 会选择足够完成任务的最小角色集合，并为每个角色定义边界清晰的 Definition of Done。
+当前基线包含七个 Profession Profile、九个预期 Agent Instance 和五个持久化功能 Squad。复杂或多角色目标会分配给一个明确的 owning Squad，而不是由外部调用者拆给多个 Agent；Orchestrator 会选择足够完成任务的最小角色集合，并为每个角色定义边界清晰的 Definition of Done。
 
 ## 核心理念：稳定契约，部署可变
 
@@ -43,7 +43,7 @@ Multica Agent Team 是一个公开的、可复用的 Agent 公司 Git 事实源�
 2. Orchestrator 选择最小必要角色，并发出带 DoD 的单次委派。
 3. 成员返回不带 mention 的交付，逐项提供证据。
 4. Orchestrator 根据风险选择自检、Evaluator 独立验证或人工确认。
-5. 任务关闭、交接，或明确记录剩余风险。
+5. Orchestrator 在父 Issue 发布一个汇总结果，用类型化 metadata 指向它，再关闭、交接或记录剩余风险。
 
 DoD 至少包含：可观察的结果、所需证据、验证方式和返工上限。确定性的路由、重试、校验、计数、排序和状态转换交给代码；有歧义的拆解、研究、设计、综合和评估交给模型判断。
 
@@ -55,6 +55,7 @@ DoD 至少包含：可观察的结果、所需证据、验证方式和返工上�
 - 带独立审查通道和机器可读状态的 PR-Sweep 工作流。
 - PRD、架构规格、变更提案、评估、事故、用户反馈和 PR 模板。
 - 覆盖同步和审查路由行为的测试。
+- 覆盖精确 Squad 归属、correlation、原生阶段、freshness 和确定性结果读取的 Squad Issue 模板。
 
 ## 快速开始
 
@@ -70,6 +71,8 @@ scripts/sync-multica.sh
 tests/sync-topology.test.py
 tests/sync-multica.test.sh
 tests/pr-sweep.test.sh
+python3 tests/squad-runtime-contract.test.py
+python3 tests/readme-quickstart.test.py
 ```
 
 同步脚本默认是 dry-run。真正应用变更需要满足仓库规定的 clean `main` 安全条件，并使用本地环境中的认证信息；操作 UUID、mention 链接、token 和私有环境值不得提交到仓库。
