@@ -41,37 +41,6 @@
 | PR sweep routing suite | `bash tests/pr-sweep.test.sh` | all routing fixtures pass | `PASS: pr-sweep PR issue routing tests` | pass |
 | Diff validation | `git diff --check` | no whitespace errors | exit code `0` | pass |
 
-## Session: 2026-09-07
-
-### Phase 3: Gateway slice
-
-- **Target:** `/Users/leilei/dev/personal/agent-team`, `feat/agent-team-runtime-foundation-plan`.
-- Added a neutral `GatewayRequest` contract and deterministic `GatewayHandler` boundary.
-- Added a logical Squad routing policy without CRM workspace, owner, runtime, or URL values.
-- Covered context-preserving dispatch, answer no-op, unknown intent, duplicate target fail-closed,
-  Issue retry, and request validation.
-- This is the local contract seam only; no Multica write or topology apply was performed.
-- Added `scripts/retry_policy.py`: timeout/503-class failures schedule a retry at least 30 minutes
-  later, while active runs and non-transient errors are fail-closed.
-
-### Test Results
-
-| Test | Command | Actual | Status |
-|---|---|---|---|
-| Gateway and retry contracts | `python3 -m unittest tests/test_gateway.py -v` | 9 tests passed | pass |
-| Topology desired-state suite | `python3 tests/sync-topology.test.py` | `PASS: topology desired-state tests` | pass |
-| Multica sync desired-state suite | `bash tests/sync-multica.test.sh` | `PASS: sync-multica desired-state tests` | pass |
-| PR sweep routing suite | `bash tests/pr-sweep.test.sh` | `PASS: pr-sweep PR issue routing tests` | pass |
-| Python syntax | `python3 -m py_compile scripts/gateway.py tests/test_gateway.py` | completed successfully | pass |
-| Mirror invariant | `cmp -s AGENTS.md CLAUDE.md` | exit code `0` | pass |
-
-### Remaining
-
-- Add a real Multica client adapter behind the contract, with bounded retry classification for
-  timeout/503 and no duplicate Issue creation.
-- Add private runtime-capability and host-pool overlays only after the public schemas are defined.
-- Open the Gateway slice as an isolated PR; do not apply topology from this feature branch.
-
 ## Error Log
 
 | Timestamp | Error | Attempt | Resolution |
@@ -87,3 +56,26 @@
 | What's the goal? | Portable Multica execution from discovery through verified delivery without private identity leakage or bypassed human gates. |
 | What have I learned? | CRM already has the desired Gateway/runtime/host-pool patterns, but they must be generalized and stripped of MoeGo deployment data. |
 | What have I done? | Grounded both repositories, created the feature branch, and recorded the plan/findings/progress. |
+
+## Session: 2026-09-07
+
+### Phase 3: Gateway slice
+
+- **Target:** `/Users/leilei/dev/personal/agent-team`, `feat/agent-team-runtime-foundation-plan`.
+- Added a neutral `GatewayRequest` contract and deterministic `GatewayHandler` boundary.
+- Added a logical Squad routing policy without CRM workspace, owner, runtime, or URL values.
+- Covered context-preserving dispatch, answer no-op, unknown intent, duplicate target fail-closed, Issue retry, and request validation.
+- This is the local contract seam only; no Multica write or topology apply was performed.
+- Added `scripts/retry_policy.py`: timeout/503-class failures schedule a retry at least 30 minutes later, while active runs and non-transient errors are fail-closed.
+
+### Test Results
+
+| Test | Command | Actual | Status |
+|---|---|---|---|
+| Gateway and retry contracts | `python3 -m unittest tests/test_gateway.py -v` | 9 tests passed | pass |
+
+### Remaining
+
+- Add a real Multica client adapter behind the contract, with bounded retry classification for timeout/503 and no duplicate Issue creation.
+- Add private runtime-capability and host-pool overlays only after the public schemas are defined.
+- Open the Gateway slice as an isolated PR; do not apply topology from this feature branch.

@@ -47,7 +47,7 @@ Phase 3 — Implementation (Gateway slice)
 - [ ] PR 2 follow-up: add a portable runtime-capability manifest and validator/installer contract
 - [ ] PR 3: add host-pool logical bindings with fail-closed identity validation
 - [ ] PR 4: add Initiative-level controller/state transitions only after the first three converge
-- **Status:** in progress — Gateway slice implemented locally; delivery still requires review and an isolated PR.
+- **Status:** in progress — Gateway and retry slices implemented locally; delivery still requires review and an isolated PR.
 
 ### Phase 4: Testing & Verification
 
@@ -108,9 +108,3 @@ For each implementation PR, add focused tests that fail without the change. For 
 
 - Do not call Multica apply from this feature branch. The repository explicitly requires clean `main == origin/main` for non-experimental topology application.
 - The next code change should be a single atomic Gateway PR, not a combined migration of all CRM internals.
-- Gateway slice files: `scripts/gateway.py`, `policies/routing.json`, and `tests/test_gateway.py`.
-- The slice is a pure adapter boundary: it has no Multica credentials, live URLs, runtime IDs, or
-  network client. A production adapter and a canary remain separate follow-up work.
-- Retry policy slice: `scripts/retry_policy.py` and its contract tests. It schedules, but does not
-  execute, a retry at least 30 minutes after a timeout/503-class failure; the caller must re-read
-  the Issue and suppress duplicate work when an active run exists.
