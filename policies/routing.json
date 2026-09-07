@@ -1,0 +1,9 @@
+{
+  "routes": {
+    "discovery": {"type": "squad", "name": "Discovery"},
+    "experience": {"type": "squad", "name": "Experience"},
+    "delivery": {"type": "squad", "name": "Delivery"},
+    "growth": {"type": "squad", "name": "Growth"},
+    "reliability": {"type": "squad", "name": "Reliability"}
+  }
+}

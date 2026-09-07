@@ -13,7 +13,7 @@ Define and then implement the smallest portable foundation that can take a proje
 
 ## Current Phase
 
-Phase 2 — Planning & Structure
+Phase 3 — Implementation (Gateway slice)
 
 ## Definition of Done for this planning slice
 
@@ -42,11 +42,12 @@ Phase 2 — Planning & Structure
 
 ### Phase 3: Implementation
 
-- [ ] PR 1: add a generic Gateway contract and deterministic handler boundary
-- [ ] PR 2: add a portable runtime-capability manifest and validator/installer contract
+- [x] PR 1 slice: add a generic Gateway contract and deterministic handler boundary
+- [x] PR 2 slice: add a portable transient-retry decision contract
+- [ ] PR 2 follow-up: add a portable runtime-capability manifest and validator/installer contract
 - [ ] PR 3: add host-pool logical bindings with fail-closed identity validation
 - [ ] PR 4: add Initiative-level controller/state transitions only after the first three converge
-- **Status:** pending
+- **Status:** in progress — Gateway slice implemented locally; delivery still requires review and an isolated PR.
 
 ### Phase 4: Testing & Verification
 
@@ -107,3 +108,9 @@ For each implementation PR, add focused tests that fail without the change. For 
 
 - Do not call Multica apply from this feature branch. The repository explicitly requires clean `main == origin/main` for non-experimental topology application.
 - The next code change should be a single atomic Gateway PR, not a combined migration of all CRM internals.
+- Gateway slice files: `scripts/gateway.py`, `policies/routing.json`, and `tests/test_gateway.py`.
+- The slice is a pure adapter boundary: it has no Multica credentials, live URLs, runtime IDs, or
+  network client. A production adapter and a canary remain separate follow-up work.
+- Retry policy slice: `scripts/retry_policy.py` and its contract tests. It schedules, but does not
+  execute, a retry at least 30 minutes after a timeout/503-class failure; the caller must re-read
+  the Issue and suppress duplicate work when an active run exists.
