@@ -1,6 +1,6 @@
 ---
 name: sync-multica
-description: Safely synchronize this repository's company constitution, Profession Profiles, Agent Instances, and persistent Squad topology to Multica, then prove the deployed state converges.
+description: Synchronize tracked company rules, profession profiles, and Squad topology to Multica with a reviewed plan and convergence checks.
 ---
 
 # Sync Multica
