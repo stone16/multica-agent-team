@@ -98,43 +98,78 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
 2. Parse every `### Checkpoint NN: <title>` header. **Do NOT create or assign
    child issues yourself** — issue creation and assignment are CEO-owned
    dispatch under the constitution's DoD Dispatch Protocol. Instead, return a
-   checkpoint PLAN in your delivery comment on the parent issue:
+   checkpoint PLAN in your delivery comment on the parent issue. Every checkpoint
+   object must preserve an explicit native `stage` and the complete list of
+   prerequisite checkpoint IDs in `depends_on`. Stage 1 has no dependencies;
+   each later checkpoint's stage is one greater than the latest stage among its
+   dependencies. If the spec does not define enough information to produce that
+   graph, report `[auto-harness: checkpoint-plan-invalid]` and the ambiguity;
+   never omit or guess either field.
 
-   ```
    [auto-harness: checkpoint-plan]
 
    Spec: <repo>/.harness/<task-id>/spec.md
-   Proposed children (for CEO dispatch):
+   Proposed children (for CEO dispatch; the fenced JSON array is authoritative):
 
-   - cp-01 "<checkpoint title>"
-     body: <the checkpoint's `#### Scope`, `#### Acceptance Criteria`, and
-       `#### Verification Commands` inlined verbatim from the spec — the
-       child agent must get self-contained context>
-     suggested dod:
-       outcome: <one sentence: what state counts as this checkpoint done>
-       evidence: <what proof must be attached: test output / screenshots / links>
-       verification: self | evaluator | human
-       max_rounds: 2
-   - cp-02 ...
+   ```json
+   [
+     {
+       "id": "cp-01",
+       "title": "Produce prerequisite artifact",
+       "stage": 1,
+       "depends_on": [],
+       "body": "The checkpoint's Scope, Acceptance Criteria, and Verification Commands inlined verbatim from the spec.",
+       "suggested_dod": {
+         "outcome": "The prerequisite artifact is accepted.",
+         "evidence": "Verification output and artifact link.",
+         "verification": "evaluator",
+         "max_rounds": 2
+       }
+     },
+     {
+       "id": "cp-02",
+       "title": "Consume prerequisite artifact",
+       "stage": 2,
+       "depends_on": ["cp-01"],
+       "body": "The dependent checkpoint's Scope, Acceptance Criteria, and Verification Commands inlined verbatim from the spec.",
+       "suggested_dod": {
+         "outcome": "The dependent behavior is accepted.",
+         "evidence": "Verification output proving the prerequisite was consumed.",
+         "verification": "evaluator",
+         "max_rounds": 2
+       }
+     }
+   ]
    ```
 
-   Suggested assignees are advisory: every implementation checkpoint goes to
-   an Engineer instance (Engineer-A or Engineer-B — instance-neutral; either
-   takes fresh work). Vertical tiers are abolished; do not route by perceived
-   difficulty.
+   Suggested implementation roles are advisory: the child is owned by the
+   parent's exact Squad, whose leader chooses an Engineer instance and the
+   required Evaluator lane(s). Vertical tiers are abolished; do not route by
+   perceived difficulty.
 
-3. The **CEO** creates and dispatches every child issue from that plan:
+3. The **CEO** validates the authoritative JSON graph before creating any child,
+   then creates and dispatches every child issue with the validator's exact
+   stage/status result. The child description must begin with the validated
+   `Checkpoint ID: <id>`, `Stage: <N>`, and
+   `Depends on: <comma-separated IDs | none>` header so the dependency identities
+   remain queryable after creation:
 
-   ```
+   ```bash
+   python3 <orchestrator-skill-dir>/scripts/validate-checkpoint-plan.py ./checkpoint-plan.json
+
    multica issue create \
      --title "[harness:cp-NN] <checkpoint title>" \
      --description-stdin \
      --parent <parent-issue-id> \
-     --assignee-id <Engineer instance UUID>
+     --stage <validated stage> \
+     --status <validated status> \
+     --assignee-id <exact owning Squad UUID>
    multica issue label add <child-id> <harness:cp label-id>
    ```
 
-   Every dispatch carries an inline `dod:` block
+   Every child body uses `templates/squad-issue.md`, including its owning Squad,
+   stable correlation ID, result contract, verification, evidence, work graph,
+   freshness, rework, and fallback sections. Every leader dispatch carries an inline `dod:` block
    (`outcome` / `evidence` / `verification` / `max_rounds`) per the DoD
    Dispatch Protocol — the CEO may adjust the suggested fields, but no child
    issue is dispatched without one. The CEO then posts the dispatch comment
@@ -145,17 +180,17 @@ When the budget trips and there is no Stage-1 spec, post this comment verbatim
 
    Spec: <repo>/.harness/<task-id>/spec.md
    Dispatched checkpoints:
-   - cp-01 → [STO-NNN](mention://issue/<id>) → Engineer
-   - cp-02 → [STO-NNN](mention://issue/<id>) → Engineer
+   - cp-01 → [STO-NNN](mention://issue/<id>) → owning Squad
+   - cp-02 → [STO-NNN](mention://issue/<id>) → owning Squad
    - ...
 
-   I will re-check this thread after all child issues close.
+   Native stage barriers will wake the parent after each runnable frontier closes.
    ```
 
 4. After posting the checkpoint plan, set parent status `in_review`. Exit
    silently; dispatch is the CEO's move, not yours.
 
-### E2E Dispatch (after every checkpoint child is done)
+### E2E Dispatch (after the checkpoint stage barrier closes)
 
 A checkpoint child counts as closed ONLY when its status is `done` AND, where
 its `dod` specified `verification: evaluator`, the Evaluator's verification
@@ -163,11 +198,12 @@ verdict is PASS. `in_review` is explicitly NOT closed — a child awaiting
 evaluator verification still blocks this step. Do not propose the E2E child
 while any checkpoint fails that bar.
 
-You do not self-trigger this step: child deliveries re-trigger the CEO, not
-you. When the CEO observes (on any re-trigger) that ALL `harness:cp` children
-of the parent meet the bar above, the CEO posts a dispatch on the PARENT issue
-@-mentioning you, the proposing Engineer, with a DoD whose `outcome` is the
-`[auto-harness: e2e-plan]` delivery. On that dispatch, propose exactly one E2E
+You do not self-trigger this step. Only `done` and `cancelled` close the native
+checkpoint barrier; `blocked` holds it open. On the native barrier wake, the CEO
+reads `multica issue children`, verifies the acceptance bar above, and posts a
+dispatch on the PARENT issue @-mentioning you, the proposing Engineer, with a
+DoD whose `outcome` is the `[auto-harness: e2e-plan]` delivery. Native wake does
+not promote later work automatically. On that dispatch, propose exactly one E2E
 child in a comment on the parent — do not create it yourself:
 
 ```
@@ -183,20 +219,24 @@ suggested dod:
   max_rounds: 2
 ```
 
-The **CEO** creates the child issue and dispatches it with an inline `dod:`
-block (`outcome` / `evidence` / `verification` / `max_rounds`):
+The **CEO** creates the child issue parked in the later stage, then promotes it
+to `todo` after the checkpoint barrier wake and dispatches it with an inline
+`dod:` block (`outcome` / `evidence` / `verification` / `max_rounds`):
 
-```
+```bash
 multica issue create \
   --title "[harness:e2e] End-to-end verification for <parent title>" \
   --description-stdin \
   --parent <parent-issue-id> \
-  --assignee-id <Engineer instance UUID — either instance>
+  --stage <checkpoint stage + 1> \
+  --status backlog \
+  --assignee-id <exact owning Squad UUID>
 multica issue label add <e2e-id> <harness:e2e label-id>
 ```
 
-E2E owner is an **Engineer instance** (instance-neutral — not the Evaluator; the
-Evaluator reviews behavior afterward, but E2E is an Engineer responsibility).
+E2E ownership remains with the parent's exact Squad using
+`templates/squad-issue.md`; the leader activates an **Engineer instance** for
+execution and the declared Evaluator lane afterward.
 
 ### Retro (after E2E child closes)
 
@@ -218,7 +258,7 @@ the `harness-engineering-skills` repo** (`gh issue create -R stone16/harness-eng
 write the retro markdown to `harness-engineering-skills/.harness/retro/<date>-<task-id>.md`
 per existing convention there.
 
-Set parent status `in_review`. The CEO then runs its Retro close-out step: after the retro delivery passes the DoD check, the CEO closes the parent (`done`). Stop.
+Keep the parent in `in_review`; do not change status here. The CEO then runs its Retro close-out step: after the retro delivery passes the DoD check, the CEO runs the Orchestrator skill's Deterministic Parent Close Sequence (correlation marker lookup/result comment → verified metadata → Squad activity → status). No auto-harness path changes the parent status directly. Stop.
 
 ### Label bootstrap (one-time per workspace)
 

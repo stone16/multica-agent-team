@@ -308,6 +308,17 @@ def test_extra_members_fail_closed() -> None:
     assert "automatic removal is intentionally forbidden" in result.stderr
 
 
+def test_unroutable_fallback_field_fails_closed() -> None:
+    tmp = make_fixture("drift")
+    manifest = tmp / "repo/squads/discovery/squad.json"
+    squad = json.loads(manifest.read_text())
+    squad["fallback_leader"] = "evaluator-a"
+    manifest.write_text(json.dumps(squad))
+    result = run_fixture(tmp)
+    assert result.returncode != 0
+    assert "fallback_leader is not a synchronized Multica field" in result.stderr
+
+
 def main() -> None:
     test_evaluators_use_qwen_preview()
     test_plan_is_read_only()
@@ -316,6 +327,7 @@ def main() -> None:
     test_apply_keeps_identity_across_rename_and_runtime_change()
     test_verify_rejects_drift_and_accepts_convergence()
     test_extra_members_fail_closed()
+    test_unroutable_fallback_field_fails_closed()
     print("PASS: topology desired-state tests")
 
 

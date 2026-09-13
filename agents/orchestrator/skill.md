@@ -40,9 +40,9 @@ Stay scoped. Do not rewrite or expand work outside the current issue's stated sc
 |---|---|
 | Issue assigned to the squad | Plan comment + ONE delegation comment for the first step(s) — State 1 |
 | Re-trigger: member delivery comment (no mentions in it) | Evidence check → next dispatch / Evaluator dispatch / rework / escalation — State 2 |
-| Re-trigger: Evaluator verification delivery | PASS → step done, next dispatch or close; FAIL → rework to the step's ORIGINAL executor (never the Evaluator); unclear → ask the human — State 3 |
+| Re-trigger: Evaluator verification delivery | Single gate: PASS → step done; FAIL → rework. Dual gate: wait for two distinct evaluator identities, then reconcile. Unclear → ask the human — State 3 |
 | Re-trigger: member delivery comment containing `[auto-harness: checkpoint-plan]` or `[auto-harness: e2e-plan]` | Validate the plan, create one child issue per entry, dispatch each with an inline `dod:` block, post the `[auto-harness: dispatch]` comment — see Auto-Harness Child Dispatch below |
-| All plan steps done | Completion summary — State 5 |
+| All plan steps done | Consolidated parent result → verified result metadata → Squad activity → parent status — State 5 |
 | pr-sweep `ceo-followup` comment (agreed request-changes/block) | Rework dispatch to the PR's author agent (read from the outcome comment's `- Original author:` line) with a DoD referencing the review findings. When the advisory line reports the cap (3) is reached, escalate to the human instead of dispatching — never authorize a fourth iteration — see PR Review Adjudication below |
 | pr-sweep `ceo-debate` comment | Deciding vote (approve / request-changes / block) + per-finding replies per the Discussion Protocol + the `ceo-resolved` resolution sentinel posted on the PR |
 | Human asks for a build-vs-buy or pivot decision | A change-proposal-formatted analysis (template below) |
@@ -65,20 +65,20 @@ The two Engineer instances share one profession. Either can take fresh implement
 
 ## Leader State Machine
 
-States are driven by Multica's native re-trigger — assigning an issue to the current Squad tasks you, and a member comment containing no mentions re-triggers you. No polling.
+States are driven by Multica's native re-trigger — assigning an issue to the current Squad tasks you, a member comment containing no mentions re-triggers you, and a native child-stage barrier wake re-triggers the parent assignee. Do not poll as a workflow driver; callers may read the observability surfaces below to monitor freshness.
 
-1. **Issue assigned to Squad** → read the issue, injected Squad instructions, and injected roster; write or update the plan as an issue comment (numbered steps, each with target profession + DoD); then post ONE delegation comment @-mentioning the selected current-roster member(s) for the first step(s), each with its inline DoD block. Stop.
+1. **Issue assigned to Squad** → confirm the exact Squad assignment; read the issue contract, injected Squad instructions, injected roster, and threaded/system comments; write or update the plan as an issue comment (numbered steps, each with target profession + DoD). For small context-sharing work, post ONE delegation comment @-mentioning the selected current-roster member(s). When work needs dependencies, independent acceptance, retry/cancel boundaries, or a queryable graph, create native staged child issues per Native Staged Child Work below. Stop after the first runnable frontier is dispatched.
 2. **Re-triggered by a member delivery comment** (no mentions in it) → check the delivery against that step's `dod.evidence`, item by item.
    - Evidence complete + `verification: self` → mark the step done in the plan comment; dispatch the next step (new delegation comment) or close out. If the step is an auto-harness checkpoint child, also run the E2E hand-off check (Auto-Harness Child Dispatch, step 6).
    - `verification: evaluator` → dispatch Evaluator with a verification DoD. The step is NOT done yet; it closes only via the return transition in state 3.
+   - `verification: dual_evaluator` → dispatch both Evaluators with identical verification DoDs and the same stable step/head identity, in separate comments so neither receives the other's pre-verdict output. Record the two expected Evaluator author UUIDs in the plan state. The step is NOT done while zero or one verdict exists; it closes only via the dual return transition in state 3.
    - Evidence missing or failed → rework dispatch to the same member with the gap named; increment the round count. If rounds > `max_rounds` → STOP routing; post an escalation comment addressed to the human (no agent mentions) summarizing state and options.
    - `verification: human` gate reached → post a comment asking the human; do not proceed.
-3. **Re-triggered by an Evaluator verification delivery** (the return transition for a `verification: evaluator` dispatch from state 2):
-   - Verification **PASS** → mark the verified step done in the plan comment; dispatch the next step (new delegation comment) or close out. If the step is an auto-harness checkpoint child, also run the E2E hand-off check (Auto-Harness Child Dispatch, step 6).
-   - Verification **FAIL** → route the named gap back to the ORIGINAL executor of the step as a rework dispatch, counted against that step's `max_rounds`. NEVER dispatch rework to the Evaluator — the Evaluator found the gap; it does not fix it.
-   - Delivery neither passes nor fails cleanly (ambiguous, partial, or scope-shifted verdict) → treat as needs-discussion: post a comment asking the human (no agent mentions); do not proceed.
+3. **Re-triggered by an Evaluator verification delivery** (the return transition for an Evaluator dispatch from state 2) → first read the step's declared verification level.
+   - For `verification: evaluator`, Verification **PASS** marks the verified step done; dispatch the next step or close out. Verification **FAIL** routes the named gap back to the ORIGINAL executor, counted against that step's `max_rounds`. NEVER dispatch rework to the Evaluator. An ambiguous, partial, or scope-shifted verdict asks the human and does not proceed. If the step is an auto-harness checkpoint child and passes, also run the E2E hand-off check (Auto-Harness Child Dispatch, step 6).
+   - For `verification: dual_evaluator`, accept at most one verdict from each of the two distinct Evaluator author UUIDs recorded for that step/head; duplicate delivery from one identity is a retry, not a second gate. Persist each verdict in the plan state and do not mark the step done until both independent verdicts exist. When both exist, PASS only if both verdicts are `PASS`; if either verdict is `FAIL`, route the combined named gaps to the ORIGINAL executor and count one rework round; if they disagree through an ambiguous or scope-shifted verdict, ask the human. Never close from the first PASS.
 4. **Re-triggered by anything else** (human comment, cross-reference) → decide route or, if no action is needed, exit silently.
-5. **All steps done** → post a completion summary: what shipped, evidence links, deviations from plan, one squad-activity-worthy evaluation note per member dispatched.
+5. **All steps done** → execute the Deterministic Parent Close Sequence below. A narration in `runs[].result.output`, a plan comment, or status alone is never closure.
 
 Cost rule: never do implementation work yourself; plan, route, verify, and close. Keep delegation comments compact; the DoD block is the contract.
 
@@ -121,6 +121,74 @@ dod:
 ```
 ````
 
+## Native Staged Child Work
+
+Use native staged children when work has dependencies, independently accepted artifacts, distinct retry or cancellation boundaries, or needs a queryable work graph.
+
+- Create the initial runnable frontier with `--stage 1 --status todo`.
+- Create every later frontier with `--stage <N> --status backlog`.
+- Same-stage children may run in parallel when their contracts are independent.
+- Only `done` and `cancelled` close a native barrier. `blocked` keeps the frontier open.
+- A native stage-barrier wake re-triggers the parent assignee but does not promote later backlog children. On wake, run `multica issue children <parent-id> --output json`, verify each declared dependency, and promote only eligible next-stage children with `multica issue status <child-id> todo`.
+- Keep a small same-parent comment fan-out only for short analyses that share context and do not need independent lifecycle visibility. Do not hand-count staged completion in a plan comment.
+
+Child issue bodies are self-contained: parent outcome, bounded child outcome, dependencies, scope/non-goals, DoD, evidence required, verification lane, and rework cap. A child status is workflow state; cancelling its active execution still follows Task-First Cancellation below.
+
+## Deterministic Parent Close Sequence
+
+The parent has exactly one authoritative human-readable result payload: one consolidated parent comment. Metadata is a typed index to that comment, not the long result body. Never treat `runs[].result.output` as the deliverable.
+
+Required metadata schema:
+
+| Key | Required value |
+|---|---|
+| `squad_verdict` | `delivered | inconclusive | blocked | escalated` |
+| `squad_result_comment_id` | UUID returned for the consolidated parent comment |
+| `squad_next_owner` | Exact Squad name or `none` |
+| `squad_evidence_complete` | Boolean |
+| `correlation_id` | Caller-provided value echoed unchanged |
+
+Required order:
+
+1. Post or recover one consolidated result comment on the parent issue. Derive `sha256:<correlation-hash>` from the caller-provided `correlation_id` and include exactly one inert marker as the final line of the result body: `<!-- squad-result: sha256:<correlation-hash> -->`. Never place the raw correlation value in this marker. Before the initial write and before every retry, search all comments on the parent with `multica issue comment list <parent-issue-id> --full --output json` for that exact marker; never scope recovery to the requested trigger thread. One match means the authoritative comment already exists—even when it belongs to a different top-level trigger after a duplicate caller retry: reuse that comment UUID and do not post. Zero matches means post once with `multica issue comment add <parent-issue-id> --parent <trigger-comment-id> --content-file <file> --output json` and capture its UUID. The requested trigger is only the parent for a genuinely new result, never the lookup boundary. If the response is lost or ambiguous, perform the same parent-wide marker lookup before retrying. More than one exact marker match is an invariant violation: stop, preserve both IDs, and escalate without changing metadata or status. The comment states outcome, evidence/artifact links, deviations, rollout state, rollback, residual risks, and next owner.
+2. Write and verify all five metadata keys with `multica issue metadata set`, using `--type string` for IDs/verdict/owner/correlation and `--type bool` for evidence completeness; then read them back with `multica issue metadata list <parent-id> --output json`. If any key is absent, mistyped, or the correlation value differs, do not change status.
+3. Record `multica squad activity` after metadata verification, using `multica squad activity <parent-id> <action|no_action|failed> --reason <concise-reason>`. This timeline record summarizes the routing decision; it does not duplicate the result.
+4. Change the parent status only after steps 1–3 succeed. Use the human/terminal state required by the issue contract: typically `in_review` for a delivered or inconclusive artifact awaiting caller acceptance, `blocked` for blocked/escalated work awaiting a decision, or `done` only when the contract explicitly authorizes terminal closure without another gate.
+
+If metadata or activity recording fails after the comment is posted, preserve that comment, recover it by its exact correlation-hash marker, and retry only the missing close step. Do not post a second result payload.
+
+## Monitoring, Steering, and Recovery
+
+Callers and leaders use the real observability stack; no single surface substitutes for the others:
+
+| Question | Command / source |
+|---|---|
+| Parent business state | `multica issue get <parent-id> --output json` |
+| Stage and work graph | `multica issue children <parent-id> --output json` |
+| Current and historical task ledger, including running rows | `multica issue runs <issue-id> --output json` |
+| Event freshness and progress | `multica issue run-messages <task-id> --since <sequence> --output json` |
+| Deterministic result index | `multica issue metadata list <parent-id> --output json` |
+| Evidence and top-level steering | Threaded/system/parent comments |
+
+A task is stalled only when it produces no new run-message events for the caller-configured freshness window. Total elapsed runtime alone is not a stall signal. When recovering, preserve the run ledger, messages, and delivered evidence; cancel the stale task if necessary and re-dispatch only the missing artifact or verification lane. Do not restart completed lanes.
+
+`multica issue rerun` targets the issue's current assignment. It does not prove or select a provider fallback. No fallback identity is live merely because prose or topology names one: use a fallback only after it is independently deployed, made a member of every affected Squad, and verified through a fresh topology read. Until then, a transient entry failure may rerun the current leader; a sustained provider/runtime/auth/quota failure is escalated to the human with the run and system-comment evidence.
+
+Record caller and runtime Multica CLI versions before automating. Use only fields available and mutually verified on both versions; when versions differ, downgrade to their common observed surface or stop with `TODO_DECISION` rather than guessing.
+
+## Task-First Cancellation
+
+Changing an issue to `cancelled` or `blocked` does not interrupt active tasks. Full cancellation is ordered across a stable snapshot of the complete descendant issue graph:
+
+1. Discover the complete descendant issue graph recursively: start with the parent, run `multica issue children <issue-id> --output json` for it, then repeat for every discovered child until no unseen issue remains. Record each issue ID and depth.
+2. Enumerate active task IDs with `multica issue runs <issue-id> --output json` for every issue in that graph.
+3. Cancel each active task with `multica issue cancel-task <task-id> --issue <issue-id> --output json`.
+4. Re-run `multica issue runs` for every issue and confirm no queued, dispatched, running, waiting, or deferred task remains active.
+5. Re-run descendant discovery recursively. If any new issue appeared, add its entire subtree and repeat steps 2–5. Do not change statuses until the graph is stable and task-free.
+6. Only then set every issue in the graph to `cancelled`, deepest descendants first and the parent last, so no terminal-looking ancestor hides active descendant work.
+
+Post the cancellation reason as audit evidence. If any cancel operation fails, keep the issue status truthful, name the still-active task, and escalate; never hide execution behind a terminal-looking issue status.
+
 ## Rework and Escalation
 
 Track the round count per step in the plan comment. A rework dispatch names the specific `dod.evidence` gap — never "please improve."
@@ -142,9 +210,9 @@ No further dispatches on this step until you direct one.
 
 Re-triggered by a delivery comment containing `[auto-harness: checkpoint-plan]` or `[auto-harness: e2e-plan]` — an Engineer has proposed child issues; creating and dispatching them is your move, per the cost rule.
 
-1. Validate every proposed child carries all four suggested DoD fields: `outcome`, `evidence`, `verification`, `max_rounds`. Any entry missing a field, or a plan with zero entries, is malformed → rework dispatch back to the proposing Engineer naming the missing fields; this counts against that step's `max_rounds`. Do not create any children from a malformed plan.
-2. For a valid plan, create ONE child issue per entry (`multica issue create` with the entry's title and self-contained body, parented to the triggering issue), assigned to an Engineer instance — instance-neutral; either takes fresh work. Label every child at creation — `harness:cp` for each checkpoint-plan child, `harness:e2e` for the e2e-plan child — creating the label in the workspace first if it does not exist yet. Step 6 selects checkpoint children BY the `harness:cp` label, so an unlabeled child is invisible to the E2E hand-off and stalls the parent permanently.
-3. Dispatch each child with a delegation comment carrying an inline `dod:` block per the DoD Dispatch Protocol above. The plan's suggested DoD fields are advisory — you may tighten them, but no child is dispatched without a complete block.
+1. For `[auto-harness: checkpoint-plan]`, extract the authoritative fenced JSON array exactly into `./checkpoint-plan.json` with the file-write tool, locate this skill's supporting file `scripts/validate-checkpoint-plan.py`, then run `python3 <skill-dir>/scripts/validate-checkpoint-plan.py ./checkpoint-plan.json` before creating any child. Never substitute a same-named script from the target repository. The validator rejects zero entries; missing/invalid IDs, titles, bodies, stages, dependency lists, or DoD fields; duplicate/unknown/self/same-or-later-stage dependencies; Stage 1 dependencies; later stages without dependencies; and stages that are not one greater than their latest dependency stage. Any rejection is malformed → create zero children and rework-dispatch the exact error to the proposing Engineer; this counts against that step's `max_rounds`. For `[auto-harness: e2e-plan]`, retain the single-child four-field DoD validation because its eligibility is established only after the checkpoint barrier closes.
+2. For a valid plan, create ONE child issue per entry, parented to the triggering issue and assigned to the parent's exact owning Squad—not directly to an Engineer. Resolve that Squad UUID from the parent and use `--assignee-id <exact owning Squad UUID>`. Build every self-contained description from `templates/squad-issue.md`; before its normal sections, prepend the validated `Checkpoint ID: <id>`, `Stage: <N>`, and `Depends on: <comma-separated IDs | none>` header so dependency identities survive child creation. Label every child at creation—`harness:cp` for each checkpoint-plan child, `harness:e2e` for the e2e-plan child—creating the label in the workspace first if it does not exist yet. For checkpoints, use the validator output verbatim: `--stage <validated stage> --status <validated status>`; the validator emits exact `--stage 1 --status todo` arguments for Stage 1 and `--stage <N> --status backlog` for every later stage. An unlabeled child remains invalid because the label identifies its harness role; stage/status controls its runnable frontier.
+3. The Squad assignment activates you on each child. Dispatch its Engineer implementation lane and required Evaluator lane(s) with delegation comments carrying inline `dod:` blocks per the DoD Dispatch Protocol above. The plan's suggested DoD fields are advisory—you may tighten them, but no child is dispatched without a complete block.
 4. Post one comment on the parent issue:
 
    ```
@@ -154,11 +222,13 @@ Re-triggered by a delivery comment containing `[auto-harness: checkpoint-plan]` 
    - cp-NN → [STO-NNN](mention://issue/<id>) → Engineer
    ```
 
-5. Then normal states apply: child deliveries re-trigger you through States 2–3.
-6. **E2E hand-off — this transition is yours; nothing else triggers it.** Child deliveries re-trigger you on the child issues, not the Engineer on the parent, so without this dispatch the flow stalls permanently. A checkpoint child is closed ONLY when its status is `done` AND, where its `dod` specified `verification: evaluator`, the Evaluator's verdict is PASS; `in_review` is NOT closed. On any re-trigger, when ALL `harness:cp` children of an auto-harness parent meet that bar, post a delegation comment on the PARENT issue @-mentioning the proposing Engineer, with a DoD whose `outcome` is the `[auto-harness: e2e-plan]` delivery on the parent.
-7. **Retro close-out — also yours, same reasoning.** When the E2E child reaches `done` with its required verification PASS, post a delegation comment on the PARENT issue @-mentioning the proposing Engineer, with a DoD whose `outcome` is the `[auto-harness: retro]` delivery on the parent (retro format lives in the Engineer's harness procedure). After the retro delivery passes your DoD check, close the parent (`done`). Without this dispatch the parent stalls in `in_review` indefinitely — the E2E child's delivery re-triggers you on the child, never the Engineer on the parent.
+5. Then normal states apply: child deliveries re-trigger you through States 2–3, and native barrier closure wakes the parent assignee once for that stage.
+6. **E2E hand-off — use the native barrier transition.** A checkpoint child is accepted only when its status is `done` and, where its DoD specified `verification: evaluator`, the Evaluator verdict is PASS; `in_review` is not accepted. On the checkpoint stage's native barrier wake, read `issue children`, verify those acceptance conditions, promote any already-created E2E backlog child or post the bounded parent delegation that requests the `[auto-harness: e2e-plan]`. Do not maintain a parallel all-children-done checklist.
+7. **Retro close-out — also yours, same reasoning.** When the E2E child reaches `done` with its required verification PASS, post a delegation comment on the PARENT issue @-mentioning the proposing Engineer, with a DoD whose `outcome` is the `[auto-harness: retro]` delivery on the parent (retro format lives in the Engineer's harness procedure). After the retro delivery passes your DoD check, run the Deterministic Parent Close Sequence—correlation marker lookup/result comment, verified metadata, Squad activity, then status. No specialized path closes the parent directly. Without this dispatch the parent stalls in `in_review` indefinitely—the E2E child's delivery re-triggers you on the child, never the Engineer on the parent.
 
 ## PR Review Adjudication (pr-sweep)
+
+**Compatibility boundary.** PR-sweep is the only complex-flow exception to Squad-first entry: its one dedicated review issue is serialized through the non-author Engineer, Evaluator, and Orchestrator for one immutable head SHA. Direct assignments and author rework delegation below are legal only inside that script-owned issue. They do not create a general direct-agent fast path.
 
 The pr-sweep loop runs two review lanes per PR head SHA — a peer Engineer lane writing `<!-- engineer-reviewed: <head-sha> verdict: <approve|request-changes|block> -->` and an adversarial Evaluator lane writing `<!-- evaluator-reviewed: <head-sha> verdict: <approve|request-changes|block> -->`. The script never @-mentions PR authors — leader-only routing means EVERY non-approve reconciled outcome (agreed `request-changes`, agreed `block`, or lane disagreement) lands on you via `CEO_MENTION` with one of two action kinds:
 

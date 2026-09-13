@@ -25,7 +25,7 @@ Stay scoped. Do not rewrite or refactor outside the current issue's stated scope
 - Do not write a PRD without first reading the discussion issue's `change-proposal`-formatted summary, if one exists.
 - Do not propose acceptance criteria you cannot verify after implementation. If you cannot describe how you would test it, the criterion is wrong.
 - Do not include implementation details (modules, interfaces, libraries, frameworks) in a PRD. Those belong in the Tech Spec.
-- Do not assign child issues to specific agents. Leave `assignee` empty; the Squad leader dispatches.
+- Do not assign child issues to specific agents. Assign the exact owning Squad by UUID; its leader dispatches members.
 - Do not silently expand scope. If you find yourself wanting to add a non-goal, mark `TODO_DECISION:` and surface it.
 - Do not @-mention anyone. If Designer or Engineer input is needed, name the role in prose ("this would benefit from Designer review before merge") and let the Orchestrator route.
 - Do not summarize evidence in a delivery comment. Address each `dod.evidence` item individually with the actual artifact.
@@ -159,33 +159,74 @@ Two changes that must ship together are ONE issue, not two. Examples of bad spli
 - "Add `tier` column to schema" + "Update API to use `tier`" — must ship in same PR.
 - "Add backend endpoint" + "Wire frontend to backend" — frontend untestable without backend.
 
-For each genuinely independent item, run:
+For each genuinely independent item, first resolve the exact owning Squad UUID
+from the accepted change proposal. Write its body from
+`templates/squad-issue.md` (do not substitute the shorter discussion summary),
+then run:
 
 ```
 multica issue create \
   --title "<imperative title>" \
   --parent <discussion-issue-id> \
-  --label <spec | impl> \
-  --description "<see body template below>"
+  --assignee-id <owning-squad-uuid> \
+  --description-file ./child-issue.md
 ```
 
-- Use `spec` label when the work needs an architecture spec before implementation.
-- Use `impl` label when scope is small enough to skip spec.
+Preserve `spec` versus `impl` as a title/body classification until a caller
+explicitly supplies the workspace's label UUID; the current CLI does not expose
+a label-name flag on `issue create`. Do not invent or paste an unverified label
+argument.
 
-Description body:
+Required body shape (copy every section from `templates/squad-issue.md`):
 
 ```
+## Owning Squad
+<exact Squad name matching --assignee-id>
+
 ## Outcome
 <one paragraph: what user-visible state changes when this issue is done>
 
-## Source
-Discussion: #<discussion-issue-id>
+## Context and Evidence
+Discussion: #<discussion-issue-id>, plus the accepted proposal and cited evidence
 
 ## Acceptance Criteria
 <bullet list, copied or adapted from the Change Proposal>
+
+## Non-Goals
+<explicit exclusions>
+
+## Scope and Target
+<bounded target>
+
+## Correlation ID
+<stable discussion-id/child-key value>
+
+## Result Contract
+<the five typed result keys from templates/squad-issue.md>
+
+## Verification
+<self | evaluator | dual_evaluator | human>
+
+## Evidence Required
+<specific proof>
+
+## Work Graph
+<stages or bounded comment fan-out>
+
+## Freshness Window
+<caller-configured duration>
+
+## Rework Cap
+`max_rounds: 2`
+
+## Entry Failure and Fallback
+<the exact fallback rule from templates/squad-issue.md>
 ```
 
-Leave `assignee` empty. Dispatch is the Squad leader's job; note in your delivery comment which items look risky or cross-cutting so the Orchestrator can set each step's DoD accordingly.
+Assignment activates the owning Squad leader, not an individual implementer.
+The leader remains responsible for selecting roles and setting each step's DoD.
+If no exact owning Squad can be justified, stop with `TODO_DECISION` instead of
+creating an unowned child.
 
 ## Review Verdict Format (for `impl`-label review trigger)
 

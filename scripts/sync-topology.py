@@ -106,6 +106,11 @@ def load_desired() -> tuple[list[dict], list[dict]]:
 
     known = set(logical_ids)
     for squad in squads:
+        if "fallback_leader" in squad:
+            raise TopologyError(
+                f"{squad['source']} fallback_leader is not a synchronized Multica field; "
+                "do not advertise an unroutable fallback"
+            )
         refs = [squad["leader"], *[member["agent"] for member in squad["members"]]]
         missing = sorted(set(refs) - known)
         if missing:

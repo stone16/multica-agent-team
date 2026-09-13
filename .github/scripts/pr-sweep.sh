@@ -517,7 +517,7 @@ issue_comment_has_marker() {
   local issue_id="$1" marker="$2" log_key="$3" repo="$4" num="$5" sha="$6"
   local comments
 
-  if ! comments=$(multica issue comment list "$issue_id" --limit 100 --output json 2>/dev/null); then
+  if ! comments=$(multica issue comment list "$issue_id" --full --output json 2>/dev/null); then
     log "    [warn] issue_comment_has_marker failed for $issue_id; will try posting"
     return 1
   fi
@@ -527,6 +527,35 @@ issue_comment_has_marker() {
     return 0
   fi
   return 1
+}
+
+sha256_text() {
+  python3 - "$1" <<'PY'
+import hashlib, sys
+print(hashlib.sha256(sys.argv[1].encode("utf-8")).hexdigest())
+PY
+}
+
+# Print all comment UUIDs whose content contains the exact marker. This is a
+# parent-wide lookup: a retried close may be running under a later sweep
+# trigger, but its stable correlation still identifies the original result.
+issue_comment_ids_for_marker() {
+  local issue_id="$1" marker="$2" comments
+  if ! comments=$(multica issue comment list "$issue_id" --full --output json 2>/dev/null); then
+    return 1
+  fi
+  printf '%s' "$comments" | python3 -c '
+import json, sys
+marker = sys.argv[1]
+data = json.load(sys.stdin)
+if isinstance(data, dict):
+    data = data.get("comments") or data.get("items") or data.get("data") or []
+for item in data:
+    if marker in (item.get("content") or item.get("body") or ""):
+        value = item.get("id") or item.get("comment_id")
+        if value:
+            print(value)
+' "$marker"
 }
 
 review_issue_description() {
@@ -628,7 +657,9 @@ create_review_issue() {
 
   if (( ! marker_ok )); then
     log "    [error] review issue marker could not be written for $GH_OWNER/$repo#$num after 3 attempts; the next sweep would duplicate issue $issue_id"
-    if multica issue update "$issue_id" --status done >/dev/null 2>&1; then
+    if close_review_issue_deterministically "$repo" "$num" "$sha" "$issue_id" \
+        "inconclusive" "false" "failed" \
+        "Review tracking aborted because the durable GitHub marker could not be written."; then
       log "    [error] compensating close applied: orphan review issue $issue_id closed; the next sweep will recreate and mark it"
     else
       log "    [error] compensating close FAILED: review issue $issue_id is live but unmarked on $GH_OWNER/$repo#$num — manual cleanup required"
@@ -981,21 +1012,103 @@ dispatch_review_outcome() {
   return 0
 }
 
-# Returns nonzero when the close was attempted and FAILED — callers gate the
-# terminal consensus sentinel on this, so a failed close is always retried by
-# the next sweep instead of being sealed behind a terminal sentinel.
-close_review_issue_if_known() {
-  local repo="$1" num="$2" sha="$3" comments="$4"
-  local issue_id
-  issue_id="$(review_issue_id_from_comments "$comments")"
-  [[ -n "$issue_id" ]] || return 0
+# Execute the repository-wide deterministic close contract for the dedicated
+# PR-review issue. Every step is idempotent under a stable correlation:
+# recover/post one result, write and verify five metadata keys, record Squad
+# activity, then change status. Callers write a terminal PR sentinel only after
+# this function succeeds.
+close_review_issue_deterministically() {
+  local repo="$1" num="$2" sha="$3" issue_id="$4"
+  local squad_verdict="${5:-delivered}" evidence_complete="${6:-true}"
+  local activity="${7:-action}" result_summary="${8:-PR review accepted after two independent approvals.}"
+  local correlation_id="pr-sweep:$GH_OWNER/$repo#$num@$sha:$squad_verdict"
+  local hash marker matches match_count comment_id="" result_file created_json metadata_json
+  hash="$(sha256_text "$correlation_id")"
+  marker="<!-- squad-result: sha256:$hash -->"
 
-  if multica issue update "$issue_id" --status done >/dev/null 2>&1; then
-    log "    review-issue=done $issue_id $GH_OWNER/$repo#$num@$sha"
+  if ! matches="$(issue_comment_ids_for_marker "$issue_id" "$marker")"; then
+    log "    [warn] result marker lookup failed for review issue $issue_id; refusing a duplicate-prone close"
+    return 1
+  fi
+  match_count="$(printf '%s\n' "$matches" | grep -c . || true)"
+  if (( match_count > 1 )); then
+    log "    [error] review issue $issue_id has $match_count authoritative result comments for one correlation; manual repair required"
+    return 1
+  elif (( match_count == 1 )); then
+    comment_id="$(printf '%s\n' "$matches" | head -1)"
   else
+    result_file="$(mktemp "$REPO_ROOT/.pr-sweep-result.XXXXXX.md")"
+    created_json="$(mktemp "$REPO_ROOT/.pr-sweep-result-response.XXXXXX.json")"
+    printf '%s\n\n- PR: %s\n- Head commit: %s\n- Rollout: none; this automation records review state only.\n- Next owner: none\n\n%s\n' \
+      "$result_summary" "$(pr_url "$repo" "$num")" "$sha" "$marker" > "$result_file"
+    if multica issue comment add "$issue_id" --content-file "$result_file" --output json > "$created_json" 2>/dev/null; then
+      comment_id="$(json_id < "$created_json")"
+    else
+      # A lost response can follow a successful write. Recover parent-wide by
+      # the exact correlation marker before considering any retry.
+      if ! matches="$(issue_comment_ids_for_marker "$issue_id" "$marker")"; then
+        rm -f "$result_file" "$created_json"
+        log "    [warn] result write and recovery lookup both failed for review issue $issue_id"
+        return 1
+      fi
+      match_count="$(printf '%s\n' "$matches" | grep -c . || true)"
+      [[ "$match_count" == "1" ]] && comment_id="$(printf '%s\n' "$matches" | head -1)"
+    fi
+    rm -f "$result_file" "$created_json"
+    [[ -n "$comment_id" ]] || {
+      log "    [warn] result comment UUID unavailable for review issue $issue_id; close deferred"
+      return 1
+    }
+  fi
+
+  multica issue metadata set "$issue_id" --key squad_verdict --value "$squad_verdict" --type string >/dev/null \
+    && multica issue metadata set "$issue_id" --key squad_result_comment_id --value "$comment_id" --type string >/dev/null \
+    && multica issue metadata set "$issue_id" --key squad_next_owner --value none --type string >/dev/null \
+    && multica issue metadata set "$issue_id" --key squad_evidence_complete --value "$evidence_complete" --type bool >/dev/null \
+    && multica issue metadata set "$issue_id" --key correlation_id --value "$correlation_id" --type string >/dev/null \
+    || {
+      log "    [warn] result metadata write failed for review issue $issue_id; status unchanged"
+      return 1
+    }
+
+  metadata_json="$(mktemp "$REPO_ROOT/.pr-sweep-metadata.XXXXXX.json")"
+  if ! multica issue metadata list "$issue_id" --output json > "$metadata_json" \
+    || ! python3 - "$metadata_json" "$squad_verdict" "$comment_id" "$correlation_id" "$evidence_complete" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+expected_bool = sys.argv[5] == "true"
+ok = (
+    data.get("squad_verdict") == sys.argv[2]
+    and data.get("squad_result_comment_id") == sys.argv[3]
+    and data.get("squad_next_owner") == "none"
+    and data.get("squad_evidence_complete") is expected_bool
+    and data.get("correlation_id") == sys.argv[4]
+)
+raise SystemExit(0 if ok else 1)
+PY
+  then
+    rm -f "$metadata_json"
+    log "    [warn] result metadata verification failed for review issue $issue_id; status unchanged"
+    return 1
+  fi
+  rm -f "$metadata_json"
+
+  if ! multica squad activity "$issue_id" "$activity" --reason "$result_summary" --output json >/dev/null; then
+    log "    [warn] Squad activity write failed for review issue $issue_id; status unchanged"
+    return 1
+  fi
+  if ! multica issue update "$issue_id" --status done >/dev/null 2>&1; then
     log "    [warn] close failed for review issue $issue_id ($GH_OWNER/$repo#$num@$sha); no terminal sentinel written — retry next sweep"
     return 1
   fi
+  log "    review-issue=done $issue_id $GH_OWNER/$repo#$num@$sha"
+}
+
+close_review_issue_if_known() {
+  local repo="$1" num="$2" sha="$3" comments="$4" issue_id
+  issue_id="$(review_issue_id_from_comments "$comments")"
+  [[ -n "$issue_id" ]] || return 0
+  close_review_issue_deterministically "$repo" "$num" "$sha" "$issue_id"
 }
 
 # ---------- Consensus ----------

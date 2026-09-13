@@ -58,9 +58,15 @@ Maintain these five baseline Multica Squad objects:
 | Growth | Launch the product and improve acquisition, activation, retention, and commercial learning | `squads/growth/` |
 | Reliability | Maintain reliability, safety, incident response, and product health | `squads/reliability/` |
 
-Squad membership is a capability roster, not an instruction to activate everybody. For every run, the Orchestrator selects the smallest sufficient set of roles and states the distinct output expected from each activated member.
+Assign complex or multi-role work to one exact owning Squad by UUID, not to several individual agents. Squad membership is a capability roster, not an instruction to activate everybody. For every run, the Orchestrator selects the smallest sufficient set of roles and states the distinct output expected from each activated member.
 
-An Issue has exactly one owning Squad at a time. Other Squads may be consulted through a child Issue or explicit mention. Transfer ownership only through an artifact-backed handoff with acceptance criteria; do not make `Discovery -> Experience -> Delivery -> Growth -> Reliability` an automatic waterfall.
+An Issue has exactly one owning Squad at a time, and its body uses `templates/squad-issue.md` as the execution and result contract. Other Squads may be consulted through a bounded child Issue or an artifact-backed mention that states the exact question and return artifact. Transfer ownership only through an artifact-backed handoff with acceptance criteria; do not make `Discovery -> Experience -> Delivery -> Growth -> Reliability` an automatic waterfall.
+
+A direct-agent fast path is allowed only when work is genuinely trivial, single-owner, low-risk, has no cross-profession dependency, and needs no independent gate. The first unmet condition requires Squad assignment. Do not fan one complex goal out to several agents from an external caller; assign the owning Squad and let its leader compose the lanes.
+
+**PR-sweep compatibility exception.** The checked-in PR-sweep automation may reuse one dedicated, serialized review issue and assign it directly, one lane at a time, to the non-author Engineer, Evaluator, and Orchestrator. This exception exists only because `.github/scripts/pr-sweep.sh` deterministically preserves one issue identity, review-lane order, immutable head SHA, Orchestrator-routed rework, and the full result → metadata → activity → status close sequence; it is not a general external-caller bypass. No other complex or multi-role flow may fan work out through direct assignment.
+
+No fallback identity is live merely because a repository field names one. A fallback is eligible only when it is a separate Orchestrator identity, deployed and added to every affected Squad, and a fresh topology verify proves that exact topology. Until then, reruns stay with the current Squad leader and sustained provider/runtime entry failures escalate to the human with evidence. Never advertise or route to an unverified fallback.
 
 Keep one accountable initiative owner and one Project ledger across Squad transitions. If phase handoffs become the dominant source of rework for a mature product, create a domain/value-stream Squad that owns that product across its lifecycle while retaining the functional Squads as specialist capability pools.
 
@@ -96,7 +102,7 @@ company contract
 
 For each multi-step run:
 
-1. Read the Issue, relevant ledger artifacts, current Squad roster, and Squad instructions.
+1. Confirm the Issue is assigned to its exact owning Squad. Read the Issue contract, relevant ledger artifacts, current Squad roster, Squad instructions, and threaded/system comments.
 2. State the objective, assumptions, risks, and acceptance criteria.
 3. Plan the minimum necessary role activations. Use deterministic code for routing, retries, validation, counting, sorting, and status transitions; use models for decomposition, ambiguous judgment, research, design, synthesis, and evaluation.
 4. Dispatch one bounded contract at a time with:
@@ -111,9 +117,25 @@ For each multi-step run:
 
 5. A member returns a mention-free delivery addressing every evidence item. The current Squad leader verifies it and chooses the next transition.
 6. Use one Evaluator for ordinary independent verification. Use both Evaluators only for high-risk, irreversible, security-sensitive, or explicitly dual-lens work. They receive independent pre-verdict contexts and do not coordinate until both verdicts exist.
-7. Close only when the acceptance criteria are evidenced. Promote durable results to the Project ledger and record unresolved risks explicitly.
+7. Close only when the acceptance criteria are evidenced. Post one consolidated parent result, index it with the required result metadata, record Squad activity, and only then change parent status. Promote durable results to the Project ledger and record unresolved risks explicitly.
 
 Only the current Squad leader may `@`-mention Squad members, and only for delegation. Members never route work by mention. A member's mention-free delivery returns control to the leader. Protocol identifiers such as `CEO_MENTION` or `ceo-resolved` may remain in automation for compatibility; they refer to the Orchestrator role.
+
+## Native Staged Child Work
+
+Use native child issues when work has dependencies, independent acceptance, its own retry or cancellation boundary, or needs a queryable work graph. Create Stage 1 children with `--stage 1 --status todo`; create later-stage children with `--stage N --status backlog`. Same-stage work may run in parallel.
+
+Only `done` and `cancelled` close a stage barrier. `blocked` keeps the frontier open. A native barrier wake notifies the parent assignee but does not promote later backlog children; the leader reads `multica issue children <parent>`, verifies dependencies, and promotes only the newly eligible children to `todo`.
+
+Use same-parent comment fan-out only for small, short, context-sharing analyses that do not need independent lifecycle visibility. Do not hand-count child completion in plan comments when native stages represent the dependency graph.
+
+## Deterministic Result and Recovery Contract
+
+The authoritative payload is one consolidated human-readable parent comment. Issue metadata is a typed index to that payload, never a copy of it, and `runs[].result.output` is not the final deliverable. The leader writes and verifies `squad_verdict`, `squad_result_comment_id`, `squad_next_owner`, `squad_evidence_complete`, and the caller-provided `correlation_id` unchanged before recording `multica squad activity` and changing parent status.
+
+Observe parent business state with `issue get`, the work graph with `issue children`, current and historical execution with `issue runs`, event freshness with `issue run-messages`, result readiness with `issue metadata list`, and evidence/steering with comments. A task is stalled only when no new run-message event arrives for the caller-configured freshness window; total elapsed time alone is not evidence of a stall. Preserve existing evidence and re-dispatch only the missing artifact or verification lane.
+
+Cancellation is task-first across the complete descendant issue graph: recursively discover every child and descendant, enumerate and cancel every active task, re-discover the graph and confirm no active task remains, then set descendants deepest-first and the parent last to `cancelled`. Changing issue status alone does not interrupt running or queued work.
 
 ## Context and Memory Boundaries
 
@@ -152,5 +174,6 @@ Do not lock implementation details too early. Framework presets are allowed, but
 - `workspace-context.md` contains company rules, never a hard-coded single-Squad roster.
 - `agents/<profession>/` defines one primary profession; overlapping Squad membership is represented only in `squads/*/squad.json`.
 - Every persistent Squad in Multica has a matching tracked definition and instructions file.
+- Runtime automation records caller and runtime Multica CLI versions and depends only on fields verified on both sides.
 - Apply topology only from clean `main` at `origin/main`, plan first, and prove convergence with a fresh read.
 - Never archive agents or Squads, prune members, publish, deploy, or send externally unless the current task explicitly authorizes that action.
