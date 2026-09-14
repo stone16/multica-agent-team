@@ -7,7 +7,7 @@ Define and then implement the smallest portable foundation that can take a proje
 ## Target
 
 - Repository: `/Users/leilei/dev/personal/agent-team`
-- Baseline: `main@584d7b6`
+- Baseline: `main@2b74799`
 - Comparison source: `/Users/leilei/dev/work/crm-skill-plugin/agent-team@683159a`
 - Working branch: `feat/agent-team-runtime-foundation-plan`
 
