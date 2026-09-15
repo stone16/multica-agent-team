@@ -7,7 +7,7 @@ Define and then implement the smallest portable foundation that can take a proje
 ## Target
 
 - Repository: `/Users/leilei/dev/personal/agent-team`
-- Baseline: `main@584d7b6`
+- Baseline: `main@2b74799`
 - Comparison source: `/Users/leilei/dev/work/crm-skill-plugin/agent-team@683159a`
 - Working branch: `feat/agent-team-runtime-foundation-plan`
 
@@ -47,7 +47,7 @@ Phase 3 — Implementation (Gateway slice)
 - [ ] PR 2 follow-up: add a portable runtime-capability manifest and validator/installer contract
 - [ ] PR 3: add host-pool logical bindings with fail-closed identity validation
 - [ ] PR 4: add Initiative-level controller/state transitions only after the first three converge
-- **Status:** in progress — Gateway slice implemented locally; delivery still requires review and an isolated PR.
+- **Status:** in progress — Gateway and retry slices implemented locally; delivery still requires review and an isolated PR.
 
 ### Phase 4: Testing & Verification
 

@@ -1,0 +1,16 @@
+name: Agent execution contracts
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: python -m unittest tests/test_gateway.py tests/test_metrics.py tests/test_promotion.py
+      - run: python3 tests/sync-topology.test.py
+      - run: bash tests/sync-multica.test.sh
+      - run: bash tests/pr-sweep.test.sh

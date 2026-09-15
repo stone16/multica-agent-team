@@ -65,3 +65,11 @@
 ## Visual/Browser Findings
 
 - No browser or external web source was used. All findings are from local repository files and command output.
+
+## LoopX comparison (2026-09-14)
+
+LoopX is an external, provider-neutral control plane rather than an execution runtime. Its public contract keeps durable objective, todos, gates, evidence, quota, recovery, and handoffs visible while Codex/Claude/other harnesses execute one bounded slice. It explicitly keeps production writes and final ownership behind human gates. Source: https://github.com/huangruiteng/loopx (README, architecture and runtime sections).
+
+The portable repository currently has deterministic ingress (`scripts/gateway.py`) and transient retry decisions (`scripts/retry_policy.py`), but no durable receipt schema, metrics event boundary, promotion state machine, or rollback evidence contract. The CRM implementation supplies reusable patterns for exact identity/readiness checks, fail-closed failover plans, per-originator fairness, overload receipts, and p50/p95/p99 hosted evidence. Its production scheduler and lease controller remain outside the repository, so those patterns should be adapted as interfaces rather than copied wholesale.
+
+Adaptation decision: keep Multica Issue/Task as the durable execution record; add provider-neutral receipt and metrics contracts with open extension fields; model promotion and rollback as explicit, idempotent state transitions; leave deployment adapters and credentials to CI/private overlays. LoopX concepts map to these contracts as goal/run identity, bounded attempt, gate, evidence, quota, and handoff, without importing LoopX code or making it the production controller.
